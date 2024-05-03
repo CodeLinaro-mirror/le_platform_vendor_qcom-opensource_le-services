@@ -19,7 +19,7 @@
  * limitations under the License.
  *
  * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 #ifndef CAMERA3REQUESTHANDLER_H_
@@ -98,6 +98,9 @@ class Camera3RequestHandler : public ThreadHelper {
 
   void SetRequestMode(CamOperationMode mode);
   void UpdateRequestedStreams(CamReqModeInputParams &params);
+
+  // map of framenumber and input_buffer
+  std::unordered_map <uint32_t, camera3_stream_buffer_t *> input_buffer_map_;
 
  protected:
   bool ThreadLoop() override;
