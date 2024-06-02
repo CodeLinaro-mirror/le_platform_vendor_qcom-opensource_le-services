@@ -28,7 +28,7 @@
  *
  * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
  *
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted (subject to the limitations in the
@@ -195,7 +195,11 @@ class RecorderServiceCallbackProxy: public IRecorderServiceCallback {
 
   ~RecorderServiceCallbackProxy() {
     QMMF_INFO("%s: Enter ", __func__);
+
     close(callback_socket_);
+
+    track_buffers_map_.clear();
+
     QMMF_INFO("%s: Exit ", __func__);
   }
 
@@ -229,11 +233,20 @@ class RecorderServiceCallbackProxy: public IRecorderServiceCallback {
   // this method.
   void NotifyDeleteVideoTrack(uint32_t track_id) override;
 
+  void NotifyCancelCaptureImage() override;
+
  private:
   void SendCallbackData(RecorderClientCallbacksAsync& message);
 
   uint32_t      client_id_;
   int32_t       callback_socket_;
+
+  std::set<uint32_t> snapshot_buffers_;
+  std::mutex  snapshot_buffers_lock_;
+  // map <track_id , set <buffer_id> >
+  std::map<uint32_t,  std::set<uint32_t> > track_buffers_map_;
+  // to protect track_buffers_map_
+  std::mutex  track_buffers_lock_;
 };
 
 class RecorderService : public IRecorderService {
