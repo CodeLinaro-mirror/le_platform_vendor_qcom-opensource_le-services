@@ -17,7 +17,12 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
+
 #include <qmmf_camera3_utils.h>
 #include <qmmf_camera3_device_client.h>
 #include <qmmf_camera3_request_handler.h>
@@ -64,6 +69,9 @@ Camera3RequestHandler::Camera3RequestHandler(Camera3Monitor &monitor)
 
 Camera3RequestHandler::~Camera3RequestHandler() {
   RequestExitAndWait();
+
+  if (!input_buffer_map_.empty())
+    input_buffer_map_.clear();
 
   if (0 <= monitor_id_) {
     monitor_.ReleaseMonitor(monitor_id_);
@@ -417,12 +425,13 @@ int32_t Camera3RequestHandler::SubmitRequest(CaptureRequest &nextRequest,
     nextRequest.input->buffers_map.insert(
     std::make_pair(in_buf_handle, in_buf.handle));
 
-    input_buffer.buffer = &GetGrallocBufferHandle(in_buf.handle);
-    input_buffer.acquire_fence = -1;
-    input_buffer.release_fence = -1;
-    input_buffer.status = CAMERA3_BUFFER_STATUS_OK;
-    input_buffer.stream = nextRequest.input;
-    request.input_buffer = &input_buffer;
+    request.input_buffer = new camera3_stream_buffer_t();
+    request.input_buffer->buffer = &GetGrallocBufferHandle(in_buf.handle);
+    request.input_buffer->acquire_fence = -1;
+    request.input_buffer->release_fence = -1;
+    request.input_buffer->status = CAMERA3_BUFFER_STATUS_OK;
+    request.input_buffer->stream = nextRequest.input;
+    input_buffer_map_.emplace(request.frame_number, request.input_buffer);
     totalNumBuffers++;
   }
 
