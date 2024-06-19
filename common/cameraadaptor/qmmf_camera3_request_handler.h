@@ -76,13 +76,14 @@ class Camera3RequestHandler : public ThreadHelper {
 
   int32_t SetRepeatingRequests(const RequestList &requests,
                                int64_t *lastFrameNumber = NULL);
+
   int32_t ClearRepeatingRequests(int64_t *lastFrameNumber = NULL);
 
   int32_t QueueRequestList(std::vector<CaptureRequest> &requests,
                            int64_t *lastFrameNumber = NULL);
 
   int32_t QueueReprocRequestList(std::vector<CaptureRequest> &requests,
-                           int64_t *lastFrameNumber = NULL);
+                                 int64_t *lastFrameNumber = NULL);
 
   int32_t Clear(int64_t *lastFrameNumber = NULL);
 
@@ -99,8 +100,10 @@ class Camera3RequestHandler : public ThreadHelper {
   void SetRequestMode(CamOperationMode mode);
   void UpdateRequestedStreams(CamReqModeInputParams &params);
 
-  // map of framenumber and input_buffer
-  std::unordered_map <uint32_t, camera3_stream_buffer_t *> input_buffer_map_;
+  int32_t CreateInputBuffer(uint32_t frameNumber,
+                            camera3_stream_buffer_t **input_buffer);
+
+  void DeleteInputBuffer(uint32_t frameNumber);
 
  protected:
   bool ThreadLoop() override;
@@ -157,6 +160,11 @@ class Camera3RequestHandler : public ThreadHelper {
   uint32_t batch_size_;
 
   Camera3SmoothZoom smooth_zoom_;
+
+  pthread_mutex_t input_buffer_map_lock_;
+
+  // map of framenumber and input_buffer
+  std::unordered_map <uint32_t, camera3_stream_buffer_t *> input_buffer_map_;
 
   static void ReprocLoop(Camera3RequestHandler *ctx);
   RequestList       reproc_requests_;

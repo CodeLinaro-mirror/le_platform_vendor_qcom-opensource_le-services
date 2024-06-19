@@ -592,7 +592,7 @@ int32_t Camera3DeviceClient::ConfigureStreamsLocked(
 
   // QBC HDR
   int32_t qbc_hdr = 0;
-  if (cam_feature_flags_ & static_cast<uint32_t>(CamFeatureFlag::kQBCHDRPreview)) {
+  if (cam_feature_flags_ & static_cast<uint32_t>(CamFeatureFlag::kQBCHDRVideo)) {
     qbc_hdr = 1;
   } else if (cam_feature_flags_ &
             static_cast<uint32_t>(CamFeatureFlag::kQBCHDRSnapshot)) {
@@ -1437,13 +1437,7 @@ void Camera3DeviceClient::HandleCaptureResult(
     input_stream->buffers_map.erase(*result->input_buffer->buffer);
     input_stream->return_input_buffer(input_buffer);
     input_stream->input_buffer_cnt--;
-    camera3_stream_buffer_t *input_stream_buffer =
-      request_handler_.input_buffer_map_[frameNumber];
-
-    if (input_stream_buffer)
-      delete (input_stream_buffer);
-
-    request_handler_.input_buffer_map_.erase(frameNumber);
+    request_handler_.DeleteInputBuffer(frameNumber);
   }
 
   return;

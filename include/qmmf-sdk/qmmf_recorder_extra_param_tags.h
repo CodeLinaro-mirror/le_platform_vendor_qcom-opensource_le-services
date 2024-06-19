@@ -136,20 +136,14 @@ enum class CamOpMode {
 enum class VHDRMode {
   /**< VDHR is disabled */
   kVHDROff,
-  /**< SDHR is disabled */
-  kSHDROff,
   /**< Raw SHDR line interleaved mode with 2 frame */
   kSHDRRaw,
   /**< YUV SHDR virtual channel mode with 2 frames */
   kSHDRYuv,
-  /**< SHDR mode switch disable */
-  kSHDRSwitchDisable,
   /**< SHDR mode switch enable */
   kSHDRSwitchEnable,
-  /**< QBC HDR mode disable */
-  kQBCHDRDisable,
-  /**< QBC HDR preview mode */
-  kQBCHDRPreview,
+  /**< QBC HDR video mode */
+  kQBCHDRVideo,
   /**< QBC HDR snapshot mode */
   kQBCHDRSnapshot,
 };

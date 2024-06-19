@@ -113,7 +113,7 @@ enum class CamFeatureFlag : uint32_t {
   kSHDRRaw = 1 << 9,          /// Raw SHDR line interleaved mode with 2 frame
   kSHDRYUV = 1 << 10,          /// YUV SHDR virtual channel mode with 2 frames
   kSHDRSwitchOn = 1 << 11,     /// SHDR switch is on
-  kQBCHDRPreview = 1 << 12,    /// QBC (in sensor) HDR on preview is on
+  kQBCHDRVideo = 1 << 12,    /// QBC (in sensor) HDR on video stream is on
   kQBCHDRSnapshot = 1 << 13,   /// QBC (in sensor) HDR on snapshot is on
 #endif // VHDR_MODES_ENABLE
 };
