@@ -62,7 +62,6 @@
 #ifdef HAVE_MMM_COLOR_FMT_H
 #include <display/media/mmm_color_fmt.h>
 #else
-#include <media/msm_media_info.h>
 #define MMM_COLOR_FMT_NV12_UBWC COLOR_FMT_NV12_UBWC
 #define MMM_COLOR_FMT_NV12_BPP10_UBWC COLOR_FMT_NV12_BPP10_UBWC
 #define MMM_COLOR_FMT_ALIGN MSM_MEDIA_ALIGN
@@ -858,7 +857,7 @@ void Camera3Stream::WaitForIdle() {
         QMMF_ERROR("%s: wait for output buffer return timed out \n", __func__);
       } else {
         QMMF_ERROR("%s: Error during state change wait: %s (%d)\n", __func__,
-                   strerror(res), res);
+                   strerror(-res), res);
       }
     }
   }
@@ -952,8 +951,8 @@ int32_t Camera3Stream::GetBufferLocked(camera3_stream_buffer *streamBuffer) {
 #else
     streamBuffer->buffer = &GetAllocBufferHandle(mem_alloc_slots_[idx]);
 #endif //TARGET_USES_GBM
-    buffers_map[*streamBuffer->buffer] =
-      mem_alloc_slots_[idx];
+
+   buffers_map.emplace(*streamBuffer->buffer, mem_alloc_slots_[idx]);
 
     if (pending_buffer_count_ == 0 && status_ != STATUS_CONFIG_ACTIVE &&
         status_ != STATUS_RECONFIG_ACTIVE) {

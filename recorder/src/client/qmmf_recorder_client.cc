@@ -2554,8 +2554,6 @@ status_t DeleteVideoTrack(const uint32_t client_id,
         android::Parcel::WritableBlob blob;
         data.writeBlob(param_size, false, &blob);
         memset(blob.data(), 0x0, param_size);
-        buffers[i].ion_fd = buffers[i].ion_fd;
-        buffers[i].ion_meta_fd = buffers[i].ion_meta_fd;
         memcpy(blob.data(), reinterpret_cast<void*>(&buffers[i]), param_size);
       }
     } else {
@@ -3276,7 +3274,7 @@ RecorderServiceCallbackStub::RecorderServiceCallbackStub() {
 }
 
 RecorderServiceCallbackStub::~RecorderServiceCallbackStub() {
-  QMMF_INFO("%s: Enter", __func__);
+  QMMF_DEBUG("%s: Enter", __func__);
 
   run_thread_ = false;
   if (callback_thread_.joinable()) {
@@ -3300,7 +3298,7 @@ RecorderServiceCallbackStub::~RecorderServiceCallbackStub() {
 
   delete[] socket_recv_buf_;
 
-  QMMF_INFO("%s: Exit", __func__);
+  QMMF_DEBUG("%s: Exit", __func__);
 }
 
 status_t RecorderServiceCallbackStub::Init(uint32_t client_id, uint32_t server_pid) {
