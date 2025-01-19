@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.1)
 
-project(qmmf_camera_adaptor)
+project(qmmf_camera_adaptor VERSION 1.0)
 
 if (NOT CAMERAADAPTOR_ENABLED)
 set(exclude EXCLUDE_FROM_ALL)
@@ -43,6 +43,11 @@ target_compile_definitions(qmmf_camera_adaptor PRIVATE
   $<$<BOOL:${HAVE_MMM_COLOR_FMT_H}>:HAVE_MMM_COLOR_FMT_H>
 )
 
+set_target_properties(qmmf_camera_adaptor PROPERTIES
+  VERSION ${PROJECT_VERSION}
+  SOVERSION ${PROJECT_VERSION_MAJOR}
+)
+
 install(TARGETS qmmf_camera_adaptor DESTINATION lib OPTIONAL)
 target_link_libraries(qmmf_camera_adaptor qmmf_camera_metadata camera_metadata qmmf_utils)
 target_link_libraries(qmmf_camera_adaptor pthread ${CMAKE_DL_LIBS} qmmf_memory_interface)
@@ -56,6 +61,6 @@ endif()
 if(NOT CAMERA_CLIENT_DISABLED)
 target_link_libraries(qmmf_camera_adaptor camera_client)
 endif()
-if(TARGET_USES_GBM)
+if(USE_LIBGBM)
 target_link_libraries(qmmf_camera_adaptor gbm)
 endif()

@@ -97,9 +97,9 @@
 #else
 #include <QCamera3VendorTags.h>
 #endif
-#ifdef TARGET_USES_GBM
+#ifdef USE_LIBGBM
 #include "common/memory/qmmf_gbm_interface.h"
-#endif
+#endif // USE_LIBGBM
 
 #ifdef DISABLE_OP_MODES
 #define QCAMERA3_SENSORMODE_ZZHDR_OPMODE      (0xF002)
@@ -164,6 +164,7 @@ Camera3DeviceClient::Camera3DeviceClient(CameraClientCallbacks clientCb)
       fps_sensormode_index_(0),
       prepare_handler_(),
       input_stream_{},
+      vendor_tag_ops_{},
       is_camera_device_available_ (true),
       cam_opmode_ (CamOperationMode::kCamOperationModeNone),
       session_metadata_ (CameraMetadata(128, 128)) {

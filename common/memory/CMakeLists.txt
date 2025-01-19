@@ -1,15 +1,19 @@
 cmake_minimum_required(VERSION 3.1)
 
-project(qmmf_memory_interface)
+project(qmmf_memory_interface VERSION 1.0)
 
 if (NOT MEMORY_ENABLED)
 set(exclude EXCLUDE_FROM_ALL)
 endif()
 
-if(TARGET_USES_GBM)
+if(USE_LIBGBM)
 add_library(qmmf_memory_interface SHARED ${exclude}
 qmmf_memory_interface.cc
 qmmf_gbm_interface.cc)
+else()
+add_library(qmmf_memory_interface SHARED ${exclude}
+qmmf_memory_interface.cc
+qmmf_dmabuf_interface.cc)
 endif()
 
 add_dependencies(qmmf_memory_interface qmmf_utils)
@@ -23,11 +27,18 @@ target_include_directories(qmmf_memory_interface
 target_include_directories(qmmf_memory_interface
  PRIVATE ${TOP_DIRECTORY}/common/utils)
 
+set_target_properties(qmmf_memory_interface PROPERTIES
+ VERSION ${PROJECT_VERSION}
+ SOVERSION ${PROJECT_VERSION_MAJOR}
+)
+
 install(TARGETS qmmf_memory_interface DESTINATION lib OPTIONAL)
 target_link_libraries(qmmf_memory_interface qmmf_utils dl qmmf_propertyvault)
 if(HAVE_ANDROID_UTILS)
 target_link_libraries(qmmf_memory_interface log utils cutils hardware)
 endif()
-if(TARGET_USES_GBM)
+if(USE_LIBGBM)
 target_link_libraries(qmmf_memory_interface gbm)
+else()
+target_link_libraries(qmmf_memory_interface camxexternalformatutils)
 endif()

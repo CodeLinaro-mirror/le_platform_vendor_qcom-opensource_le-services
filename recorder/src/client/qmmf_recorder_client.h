@@ -74,19 +74,21 @@
 #include <qmmf-sdk/qmmf_recorder_extra_param.h>
 
 #include <linux/dma-buf.h>
-#ifdef TARGET_USES_GBM
+#ifdef USE_LIBGBM
 #include <gbm.h>
 #include <gbm_priv.h>
-#endif
+#endif // USE_LIBGBM
 
 #include "common/utils/qmmf_log.h"
 #include "recorder/src/client/qmmf_recorder_service_intf.h"
 
+#ifdef USE_LIBGBM
 using gbm_perform_fnp = decltype(gbm_perform);
 using gbm_bo_destroy_fnp = decltype(gbm_bo_destroy);
 using gbm_bo_import_fnp = decltype(gbm_bo_import);
 using gbm_device_destroy_fnp = decltype(gbm_device_destroy);
 using gbm_create_device_fnp = decltype(gbm_create_device);
+#endif // USE_LIBGBM
 
 using copy_camera_metadata_fnp = decltype(copy_camera_metadata);
 using get_camera_metadata_compact_size_fnp = decltype(get_camera_metadata_compact_size);
@@ -114,34 +116,23 @@ class RecorderClient {
 
   status_t StopCamera(const uint32_t camera_id);
 
-  status_t CreateSession(const SessionCb& cb, uint32_t* session_id);
-
-  status_t DeleteSession(const uint32_t session_id);
-
-  status_t StartSession(const uint32_t session_id);
-
-  status_t StopSession(const uint32_t session_id, bool do_flush);
-
-  status_t PauseSession(const uint32_t session_id);
-
-  status_t ResumeSession(const uint32_t session_id);
-
-  status_t CreateVideoTrack(const uint32_t session_id, const uint32_t track_id,
+  status_t CreateVideoTrack(const uint32_t track_id,
                             const VideoTrackParam& param,
                             const VideoExtraParam& xtraparam,
                             const TrackCb& cb);
 
-  status_t ReturnTrackBuffer(const uint32_t session_id,
-                             const uint32_t track_id,
+  status_t ReturnTrackBuffer(const uint32_t track_id,
                              std::vector<BufferDescriptor> &buffers);
 
-  status_t SetVideoTrackParam(const uint32_t session_id,
-                              const uint32_t track_id,
+  status_t SetVideoTrackParam(const uint32_t track_id,
                               VideoParam type, const void *param,
                               size_t size);
 
-  status_t DeleteVideoTrack(const uint32_t session_id,
-                            const uint32_t track_id);
+  status_t DeleteVideoTrack(const uint32_t track_id);
+
+  status_t StartVideoTracks(const std::unordered_set<uint32_t>& track_ids);
+
+  status_t StopVideoTracks(const std::unordered_set<uint32_t>& track_ids);
 
   status_t CaptureImage(const uint32_t camera_id,
                         const SnapshotType type,
@@ -192,19 +183,16 @@ class RecorderClient {
   void NotifyRecorderEvent(EventType event_type, void *event_data,
                            size_t event_data_size);
 
-  void NotifySessionEvent(EventType event_type, void *event_data,
-                          size_t event_data_size);
-
   void NotifySnapshotData(uint32_t camera_id, uint32_t imgcount,
                           BnBuffer& buffer, BufferMeta& meta);
 
   void NotifyOfflineJpegData(int32_t buf_fd, uint32_t encoded_size);
 
-  void NotifyVideoTrackData(uint32_t session_id, uint32_t track_id,
+  void NotifyVideoTrackData(uint32_t track_id,
                             std::vector<BnBuffer>& bn_buffers,
                             std::vector<BufferMeta>& metas);
 
-  void NotifyVideoTrackEvent(uint32_t session_id, uint32_t track_id,
+  void NotifyVideoTrackEvent(uint32_t track_id,
                              EventType event_type,
                              void *event_data,
                              size_t event_data_size);
@@ -253,19 +241,17 @@ class RecorderClient {
   // Map <buffer index, buffer info>
   typedef std::map<uint32_t, BufferInfo> BufferInfoMap;
 
-#ifdef TARGET_USES_GBM
+#ifdef USE_LIBGBM
   void ImportBuffer(int32_t fd, int32_t metafd, const BufferMeta& meta);
   void ReleaseBuffer(int32_t& fd, int32_t& meta_fd);
-#endif
+#endif // USE_LIBGBM
 
   status_t MapBuffer(BufferInfo& info, const BufferMeta& meta);
   void UnmapBuffer(BufferInfo& info);
 
-  void UpdateSessionTopology(const uint32_t& session_id,
-                             const uint32_t& track_id,
-                             bool /*Add or Delete*/);
-
   bool CheckServiceStatus();
+
+  bool CheckTrackIdsValid(const std::unordered_set<uint32_t>& track_ids);
 
   void ServiceDeathHandler();
 
@@ -283,14 +269,8 @@ class RecorderClient {
   int32_t                           ion_device_;
   uint32_t                          client_id_;
 
-  // List track IDs in a session.
-  std::map<uint32_t, std::set<uint32_t> > sessions_;
-
-  // List of session callbacks.
-  std::map<uint32_t, SessionCb >    session_cb_list_;
-
   // List of track callbacks.
-  std::map<uint32_t, std::map<uint32_t, TrackCb> > track_cb_list_;
+  std::map<uint32_t, TrackCb >      track_cb_list_;
   std::mutex                        track_cb_lock_;
 
   RecorderCb                        recorder_cb_;
@@ -308,7 +288,7 @@ class RecorderClient {
   BufferInfoMap                     snapshot_buffers_;
   std::mutex                        snapshot_buffers_lock_;
 
-#ifdef TARGET_USES_GBM
+#ifdef USE_LIBGBM
   int32_t                           gbm_fd_;
   gbm_device*                       gbm_device_;
 
@@ -321,7 +301,7 @@ class RecorderClient {
   gbm_bo_import_fnp*                gbm_bo_import_;
   gbm_device_destroy_fnp*           gbm_device_destroy_;
   gbm_create_device_fnp*            gbm_create_device_;
-#endif
+#endif // USE_LIBGBM
 
   // VendorTagDescriptor
   std::shared_ptr<VendorTagDescriptor>           vendor_tag_desc_;
@@ -343,20 +323,17 @@ class ServiceCallbackHandler : public RecorderServiceCallbackStub {
   void NotifyRecorderEvent(EventType event_type, void *event_data,
                            size_t event_data_size) override;
 
-  void NotifySessionEvent(EventType event_type, void *event_data,
-                          size_t event_data_size) override;
-
   void NotifySnapshotData(uint32_t camera_id, uint32_t imgcount,
                           BnBuffer& buffer, BufferMeta& meta) override;
 
   void NotifyOfflineJpegData(int32_t buf_fd,
                              uint32_t encoded_size) override;
 
-  void NotifyVideoTrackData(uint32_t session_id, uint32_t track_id,
+  void NotifyVideoTrackData(uint32_t track_id,
                             std::vector<BnBuffer>& buffers,
                             std::vector<BufferMeta>& metas) override;
 
-  void NotifyVideoTrackEvent(uint32_t session_id, uint32_t track_id,
+  void NotifyVideoTrackEvent(uint32_t track_id,
                              EventType event_type,
                              void *event_data,
                              size_t event_data_size) override;
