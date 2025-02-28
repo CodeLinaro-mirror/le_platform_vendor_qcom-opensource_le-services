@@ -28,7 +28,7 @@
  *
  * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
  *
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted (subject to the limitations in the
@@ -537,6 +537,22 @@ status_t CameraContext::OpenCamera(const uint32_t camera_id,
     }
   }
 
+  if (extra_param.Exists(QMMF_OFFLINE_IFE)) {
+    size_t entry_count = extra_param.EntryCount(QMMF_OFFLINE_IFE);
+    if (entry_count == 1) {
+      OfflineIFE offline_ife;
+      extra_param.Fetch(QMMF_OFFLINE_IFE, offline_ife, 0);
+      if (offline_ife.enable == true) {
+        QMMF_INFO("%s: Offline IFE usecase is ON..", __func__);
+        camera_parameters_.cam_feature_flags |=
+            static_cast<uint32_t>(CamFeatureFlag::kOfflineIFEEnable);
+      }
+    } else {
+      QMMF_ERROR("%s: Invalid Offline IFE param received", __func__);
+      return -EINVAL;
+    }
+  }
+
   camera_parameters_.batch_size = 1;
 
   if (!camera_device_) {
@@ -1014,6 +1030,22 @@ status_t CameraContext::CreateStream(const StreamParam& param,
     return -EINVAL;
   }
 
+  if (extra_param.Exists(QMMF_SUPER_FRAMES)) {
+    size_t entry_count = extra_param.EntryCount(QMMF_SUPER_FRAMES);
+    if (entry_count ==1) {
+      SuperFrames super_frames;
+      extra_param.Fetch(QMMF_SUPER_FRAMES, super_frames, 0);
+      if (super_frames.n_frames > 1) {
+        QMMF_INFO("%s: super buffer enable and n_frames=%d", __func__, super_frames.n_frames);
+        camera_parameters_.super_frames = super_frames.n_frames;
+        batch = 1;
+      }
+    } else {
+      QMMF_ERROR("%s: Invalid SUPER_FRAMES received", __func__);
+      return -EINVAL;
+    }
+  }
+
   camera_parameters_.batch_size = batch;
 
   // FIXME: HFR control and exception for fastswitch will be removed after
@@ -1025,6 +1057,9 @@ status_t CameraContext::CreateStream(const StreamParam& param,
         "track_id = %x", __func__, param.id);
     hfr_detected_ = true;
   }
+
+  QMMF_INFO("%s: camera_parameters_.batch_size=%u super_frames=%d", __func__,
+      camera_parameters_.batch_size, camera_parameters_.super_frames);
 
   std::shared_ptr<CameraPort> port =
       std::make_shared<CameraPort>(param, camera_parameters_,
@@ -2997,8 +3032,23 @@ status_t CameraPort::Init() {
 #endif // !HAVE_BINDER
     }
 
+    if (camera_parameters_.super_frames == 2) {
+      cam_stream_params_.allocFlags.flags |=
+          IMemAllocUsage::kFlex2Batch;
+    } else if (camera_parameters_.super_frames == 4) {
+      cam_stream_params_.allocFlags.flags |=
+          IMemAllocUsage::kFlex4Batch;
+    } else if (camera_parameters_.super_frames == 8) {
+      cam_stream_params_.allocFlags.flags |=
+          IMemAllocUsage::kFlex8Batch;
+    }
+
     switch (params_.format) {
       case BufferFormat::kNV12UBWC:
+        cam_stream_params_.allocFlags.flags |=
+            IMemAllocUsage::kPrivateAllocUbwc;
+        break;
+      case BufferFormat::kNV12UBWCFLEX:
         cam_stream_params_.allocFlags.flags |=
             IMemAllocUsage::kPrivateAllocUbwc;
         break;

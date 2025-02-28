@@ -28,7 +28,7 @@
  *
  * Changes from Qualcomm Innovation Center, Inc. are provided under the following license:
  *
- * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2023-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted (subject to the limitations in the
@@ -93,6 +93,8 @@ enum ParamTag {
   QMMF_IFE_DIRECT_STREAM,
   QMMF_CAM_OP_MODE_CONTROL,
   QMMF_INPUT_ROI,
+  QMMF_OFFLINE_IFE,
+  QMMF_SUPER_FRAMES,
 };
 
 enum class SlaveMode {
@@ -343,6 +345,23 @@ struct InputROISetup: DataTagBase {
   InputROISetup() :
     DataTagBase(QMMF_INPUT_ROI), enable(false) {
   }
+};
+
+  struct OfflineIFE: DataTagBase {
+  /**< Add support for client to enable/disable */
+  /**< Offline IFE usecase */
+  /**< Default: False */
+  bool enable;
+  OfflineIFE() :
+    DataTagBase(QMMF_OFFLINE_IFE), enable(false) {
+  }
+};
+
+struct SuperFrames: DataTagBase {
+  /**< Add support to super buffer */
+  /**< the frame_count in one super buffer */
+  int8_t n_frames;
+  SuperFrames() : DataTagBase(QMMF_SUPER_FRAMES), n_frames(1) {}
 };
 
 }; //namespace recorder.
