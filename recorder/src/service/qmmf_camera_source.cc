@@ -115,7 +115,7 @@ CameraSource::CameraSource()
 
   QMMF_INFO("%s: Enter", __func__);
 
-  int32_t n_preload = Property::Get("persist.qmmf.preload.cameras", 0);
+  int32_t n_preload = Property::Get("persist.qmmf.preload.cameras", 1);
 
   // Preload camera interefaces.
   for (int32_t idx = 0; idx < n_preload; ++idx) {
@@ -555,10 +555,6 @@ status_t CameraSource::CreateTrackSource(const uint32_t track_id,
       goto FAIL;
     }
   } else {
-    if (params.format == VideoFormat::kRGB) {
-      QMMF_ERROR("%s Unsupported format: RGB", __func__);
-      goto FAIL;
-    }
     ret = track_source->Init();
     if (ret != 0) {
       QMMF_ERROR("%s: Track(%x): TrackSource Init failed!", __func__,
@@ -770,6 +766,18 @@ status_t CameraSource::GetDefaultCaptureParam(const uint32_t camera_id,
   active_cameras_lock_.unlock();
 
   return camera->GetDefaultCaptureParam(meta);
+}
+
+status_t CameraSource::GetCamStaticInfo(std::vector<CameraMetadata> &meta) {
+  std::shared_ptr<CameraInterface> camera;
+
+  camera = std::make_shared<CameraContext>();
+  if (!camera) {
+    QMMF_ERROR("%s: Can't Instantiate Camera Context!", __func__);
+    return -ENOMEM;
+  }
+
+  return camera->GetCamStaticInfo(meta);
 }
 
 status_t CameraSource::GetCameraCharacteristics(const uint32_t camera_id,

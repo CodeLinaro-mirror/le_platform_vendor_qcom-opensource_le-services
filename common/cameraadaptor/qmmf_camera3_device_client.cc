@@ -251,13 +251,6 @@ int32_t Camera3DeviceClient::Initialize() {
     goto exit;
   }
 
-  QMMF_INFO("%s: Camera Module author: %s, version: %d name: %s\n", __func__,
-            camera_module_->common.author, camera_module_->common.hal_api_version,
-            camera_module_->common.name);
-
-  number_of_cameras_ = camera_module_->get_number_of_cameras();
-  QMMF_INFO("%s: Number of cameras: %d\n", __func__, number_of_cameras_);
-
   if (NULL != camera_module_->init) {
     res = camera_module_->init();
     if (0 != res) {
@@ -265,6 +258,13 @@ int32_t Camera3DeviceClient::Initialize() {
       goto exit;
     }
   }
+
+  QMMF_INFO("%s: Camera Module author: %s, version: %d name: %s\n", __func__,
+            camera_module_->common.author, camera_module_->common.hal_api_version,
+            camera_module_->common.name);
+
+  number_of_cameras_ = camera_module_->get_number_of_cameras();
+  QMMF_INFO("%s: Number of cameras: %d\n", __func__, number_of_cameras_);
 
   if (camera_module_->get_vendor_tag_ops) {
     std::lock_guard<std::mutex> lk(vendor_tag_mutex_);
@@ -653,6 +653,21 @@ int32_t Camera3DeviceClient::ConfigureStreamsLocked(
       session_metadata_.update(tag_id, &offline_ife, 1);
     } else {
       QMMF_WARN("%s: Failed to get session parameter EnableOfflineIFE",
+          __func__);
+    }
+  }
+
+  if (cam_feature_flags_ & static_cast<uint32_t>(CamFeatureFlag::kSWTNR)) {
+    uint8_t sw_tnr = true;
+
+    res = session_metadata_.getTagFromName(
+        "org.codeaurora.qcamera3.sessionParameters.EnableSWMCTF",
+        vtags.get(), &tag_id);
+    if (res == 0) {
+      QMMF_VERBOSE("%s:Setting EnableSWMCTF to %d\n", __func__, sw_tnr);
+      session_metadata_.update(tag_id, &sw_tnr, 1);
+    } else {
+      QMMF_WARN("%s: Failed to get session parameter for EnableSWMCTF",
           __func__);
     }
   }

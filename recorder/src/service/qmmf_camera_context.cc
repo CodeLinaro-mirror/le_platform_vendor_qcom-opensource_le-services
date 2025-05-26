@@ -553,6 +553,22 @@ status_t CameraContext::OpenCamera(const uint32_t camera_id,
     }
   }
 
+  if (extra_param.Exists(QMMF_SW_TNR)) {
+    size_t entry_count = extra_param.EntryCount(QMMF_SW_TNR);
+    if (entry_count == 1) {
+      SWTNR sw_tnr;
+      extra_param.Fetch(QMMF_SW_TNR, sw_tnr, 0);
+      if (sw_tnr.enable == true) {
+        QMMF_INFO("%s: SW TNR usecase is ON..", __func__);
+        camera_parameters_.cam_feature_flags |=
+            static_cast<uint32_t>(CamFeatureFlag::kSWTNR);
+      }
+    } else {
+      QMMF_ERROR("%s: Invalid SW TNR param received", __func__);
+      return -EINVAL;
+    }
+  }
+
   camera_parameters_.batch_size = 1;
 
   if (!camera_device_) {
@@ -1374,6 +1390,25 @@ status_t CameraContext::GetDefaultCaptureParam(CameraMetadata &meta) {
   }
   QMMF_DEBUG("%s: Exit", __func__);
   return ret;
+}
+
+status_t CameraContext::GetCamStaticInfo(std::vector<CameraMetadata> &meta) {
+
+  QMMF_DEBUG("%s: Enter", __func__);
+  uint32_t num_of_cameras = camera_device_->GetNumberOfCameras();
+  meta.resize(num_of_cameras);
+
+  for (int i=0; i < num_of_cameras; i++) {
+    meta[i].clear();
+    int32_t res = camera_device_->GetCameraInfo(i, &meta[i]);
+    if (0 != res) {
+      QMMF_ERROR("%s: Error during camera static info query: %s!\n", __func__,
+                 strerror(-res));
+      return -ENODEV;
+    }
+  }
+  QMMF_DEBUG("%s: Exit", __func__);
+  return 0;
 }
 
 status_t CameraContext::GetCameraCharacteristics(CameraMetadata &meta) {
