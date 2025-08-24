@@ -11,6 +11,7 @@ target_include_directories(qmmf_camera_metadata
  PRIVATE ${TOP_DIRECTORY})
 
 include_directories(${SYSROOT_INCDIR}/camx-api/camx/service)
+
 #EXPORT_HEADERS
 install(FILES
   ${TOP_DIRECTORY}/include/qmmf-sdk/qmmf_camera_metadata.h
