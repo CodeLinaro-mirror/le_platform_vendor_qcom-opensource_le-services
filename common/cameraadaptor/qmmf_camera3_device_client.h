@@ -25,10 +25,6 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * Changes from Qualcomm Technologies, Inc. are provided under the following license:
- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
- * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
 /*
@@ -47,9 +43,15 @@
  * limitations under the License.
  */
 
+/* Changes from Qualcomm Technologies, Inc. are provided under the following license:
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ */
+
 #ifndef CAMERA3DEVICE_H_
 #define CAMERA3DEVICE_H_
 
+#include <stdarg.h>
 #include <pthread.h>
 #ifdef HAVE_ANDROID_UTILS
 #include <hardware/hardware.h>
@@ -66,12 +68,12 @@
 
 #include "qmmf-sdk/qmmf_vendor_tag_descriptor.h"
 #include "qmmf-sdk/qmmf_camera_metadata.h"
-#include "qmmf_camera3_types.h"
 #include "qmmf_camera3_internal_types.h"
 #include "qmmf_camera3_stream.h"
 #include "qmmf_camera3_request_handler.h"
 #include "qmmf_camera3_monitor.h"
 #include "qmmf_camera3_prepare_handler.h"
+#include "qmmf_camera3_device_intf.h"
 
 extern "C" {
 typedef void(callbacks_process_capture_result_t)(
@@ -93,46 +95,52 @@ namespace qmmf {
 
 namespace cameraadaptor {
 
-class Camera3DeviceClient : public camera3_callback_ops,
+class Camera3DeviceClient : public ICameraDeviceClient,
+                            public camera3_callback_ops,
                             public camera_module_callbacks_t {
  public:
   Camera3DeviceClient(CameraClientCallbacks clientCb);
   virtual ~Camera3DeviceClient();
 
-  int32_t Initialize();
+  int32_t Initialize() override;
 
-  int32_t OpenCamera(uint32_t idx);
-  int32_t BeginConfigure() { return 0; }
+  int32_t OpenCamera(uint32_t idx) override;
+  int32_t BeginConfigure() override { return 0; }
 
-  int32_t EndConfigure(const CameraParameters& stream_config
-                       = CameraParameters());
+  int32_t EndConfigure(
+      const CameraParameters &stream_config = CameraParameters()) override;
 
-  int32_t UpdateCameraParams(const CameraParameters& camera_parameters
-                       = CameraParameters());
+  int32_t UpdateCameraParams(
+      const CameraParameters &camera_parameters = CameraParameters()) override;
 
-  int32_t DeleteStream(int streamId, bool cache);
-  int32_t CreateStream(const CameraStreamParameters &outputConfiguration);
+  int32_t DeleteStream(int streamId, bool cache) override;
+  int32_t CreateStream(
+      const CameraStreamParameters &outputConfiguration) override;
   int32_t CreateInputStream(
-      const CameraInputStreamParameters &inputConfiguration);
+      const CameraInputStreamParameters &inputConfiguration) override;
 
-  int32_t CreateDefaultRequest(int templateId, CameraMetadata *request);
+  int32_t CreateDefaultRequest(int templateId,
+                               CameraMetadata *request) override;
   int32_t SubmitRequest(Camera3Request request, bool streaming = false,
-                        int64_t *lastFrameNumber = NULL);
+                        int64_t *lastFrameNumber = NULL) override;
   int32_t SubmitRequestList(std::vector<Camera3Request> requests,
                             bool streaming = false,
-                            int64_t *lastFrameNumber = NULL);
-  int32_t ReturnStreamBuffer(StreamBuffer buffer);
-  int32_t CancelRequest(int requestId, int64_t *lastFrameNumber = NULL);
+                            int64_t *lastFrameNumber = NULL) override;
+  int32_t ReturnStreamBuffer(StreamBuffer buffer) override;
+  int32_t CancelRequest(int requestId,
+                        int64_t *lastFrameNumber = NULL) override;
 
-  int32_t GetCameraInfo(uint32_t idx, CameraMetadata *info);
-  int32_t GetNumberOfCameras() { return number_of_cameras_; }
-  const std::vector<int32_t> GetRequestIds(){ return current_request_ids_; }
-  int32_t WaitUntilIdle();
+  int32_t GetCameraInfo(uint32_t idx, CameraMetadata *info) override;
+  int32_t GetNumberOfCameras() override { return number_of_cameras_; }
+  const std::vector<int32_t> GetRequestIds() override {
+    return current_request_ids_;
+  }
+  int32_t WaitUntilIdle() override;
 
-  int32_t Flush(int64_t *lastFrameNumber = NULL);
-  int32_t Prepare(int streamId);
-  int32_t TearDown(int streamId);
-  int32_t SetCameraSessionParam(const CameraMetadata &meta);
+  int32_t Flush(int64_t *lastFrameNumber = NULL) override;
+  int32_t Prepare(int streamId) override;
+  int32_t TearDown(int streamId) override;
+  int32_t SetCameraSessionParam(const CameraMetadata &meta) override;
 
  private:
   std::vector<int32_t> current_request_ids_;
@@ -169,6 +177,9 @@ class Camera3DeviceClient : public camera3_callback_ops,
   void Notify(const camera3_notify_msg *msg);
   void NotifyError(const camera3_error_msg_t &msg);
   void NotifyShutter(const camera3_shutter_msg_t &msg);
+#ifdef ENABLE_SYSTEM_MESSAGE_EVENT
+  void NotifySystemEvent(const camera3_system_msg_t &msg);
+#endif
   void RemovePendingRequestLocked(uint32_t frameNumber);
   void ReturnOutputBuffers(const camera3_stream_buffer_t *outputBuffers,
                            size_t numBuffers, int64_t timestamp,
@@ -184,8 +195,6 @@ class Camera3DeviceClient : public camera3_callback_ops,
   int32_t InternalPauseAndWaitLocked();
   int32_t InternalResumeLocked();
   int32_t WaitUntilStateThenRelock(bool active, int64_t timeout);
-
-  int32_t CalculateBlobSize(int32_t width, int32_t height);
 
   int32_t ConfigureStreams(
         const CameraParameters& camera_parameters = CameraParameters(),
@@ -263,8 +272,6 @@ class Camera3DeviceClient : public camera3_callback_ops,
   bool reconfig_;
 
   CameraMetadata request_templates_[CAMERA3_TEMPLATE_COUNT];
-  static const int32_t JPEG_BUFFER_SIZE_MIN =
-      256 * 1024 + sizeof(camera3_jpeg_blob);
 
   camera_module_t *camera_module_;
   camera3_device_t *device_;
@@ -309,7 +316,6 @@ class Camera3DeviceClient : public camera3_callback_ops,
 };
 
 }  // namespace cameraadaptor ends here
-
 }  // namespace qmmf ends here
 
 #endif /* CAMERA3DEVICE_H_ */

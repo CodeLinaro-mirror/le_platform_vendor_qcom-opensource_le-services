@@ -36,7 +36,6 @@
 #include <thread>
 
 #include "qmmf-sdk/qmmf_camera_metadata.h"
-#include "common/cameraadaptor/qmmf_camera3_types.h"
 #include "common/cameraadaptor/qmmf_camera3_internal_types.h"
 #include "common/utils/qmmf_thread.h"
 #include "qmmf_camera3_smooth_zoom.h"
@@ -125,6 +124,8 @@ class Camera3RequestHandler : public ThreadHelper {
 
   void DeleteInputBuffer(uint32_t frameNumber);
 
+  void SetSystemEventOccurred(bool occurred);
+
  protected:
   bool ThreadLoop() override;
 
@@ -199,6 +200,9 @@ class Camera3RequestHandler : public ThreadHelper {
   CamReqModeParams  cam_reqmode_params_;
   std::mutex        cam_reqmode_lock_;
   CameraMetadata    request_mdata_;
+
+  // Flag to track system event occurrence
+  std::atomic<bool> system_event_occurred_;
 };
 
 }  // namespace cameraadaptor ends here

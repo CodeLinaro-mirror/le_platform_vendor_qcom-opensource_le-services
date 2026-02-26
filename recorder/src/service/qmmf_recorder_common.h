@@ -35,10 +35,10 @@
 
 
 #include "qmmf-sdk/qmmf_recorder_params.h"
-#include "common/utils/qmmf_common_utils.h"
+#include "common/utils/qmmf_common_utils_defs.h"
 #include "common/utils/qmmf_log.h"
 
-#include "recorder/src/client/qmmf_recorder_service_intf.h"
+#include "qmmf_recorder_service_intf.h"
 #include "recorder/src/service/qmmf_remote_cb.h"
 
 #ifdef HAVE_BINDER
@@ -82,6 +82,8 @@ typedef std::function< const std::shared_ptr<RemoteCallBack>& (uint32_t client_i
 #endif // HAVE_ANDROID_UTILS
 
 typedef std::function<void(uint32_t camera_id, int32_t errcode)> ErrorCb;
+
+typedef std::function<void(uint32_t camera_id, int32_t errcode)> SystemCb;
 
 }; //namespace recorder.
 

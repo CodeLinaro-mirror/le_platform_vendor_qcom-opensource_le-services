@@ -1,6 +1,6 @@
-cmake_minimum_required(VERSION 3.1)
-
 project(qmmf_camera_metadata VERSION 1.0)
+
+find_package(PkgConfig REQUIRED)
 
 add_library(qmmf_camera_metadata SHARED ${exclude}
   ${CMAKE_CURRENT_SOURCE_DIR}/qmmf_vendor_tag_descriptor.cpp
@@ -8,9 +8,12 @@ add_library(qmmf_camera_metadata SHARED ${exclude}
 )
 
 target_include_directories(qmmf_camera_metadata
- PRIVATE ${TOP_DIRECTORY})
+ PRIVATE ${TOP_DIRECTORY}
+ PUBLIC ${TOP_DIRECTORY}/include
+)
 
-include_directories(${SYSROOT_INCDIR}/camx-api/camx/service)
+# Add destination of compiletime pkg-config file to PKG_CONFIG_PATH
+set(ENV{PKG_CONFIG_PATH} "${CMAKE_CURRENT_BINARY_DIR}:$ENV{PKG_CONFIG_PATH}")
 
 #EXPORT_HEADERS
 install(FILES
@@ -18,12 +21,28 @@ install(FILES
   ${TOP_DIRECTORY}/include/qmmf-sdk/qmmf_vendor_tag_descriptor.h
   DESTINATION include/qmmf-sdk)
 
+install(DIRECTORY
+  ${TOP_DIRECTORY}/include/system
+  DESTINATION include/camera-metadata)
+
 set_target_properties(qmmf_camera_metadata PROPERTIES
   VERSION ${PROJECT_VERSION}
   SOVERSION ${PROJECT_VERSION_MAJOR}
 )
 
 install(TARGETS qmmf_camera_metadata DESTINATION lib OPTIONAL)
+
+# Configure and install pkg-config file
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/qmmf_camera_metadata.pc.in
+  ${CMAKE_CURRENT_BINARY_DIR}/qmmf_camera_metadata.pc
+  @ONLY
+)
+
+install(
+  FILES ${CMAKE_CURRENT_BINARY_DIR}/qmmf_camera_metadata.pc
+  DESTINATION lib/pkgconfig
+)
 
 target_link_libraries(qmmf_camera_metadata pthread ${CMAKE_DL_LIBS})
 if(HAVE_ANDROID_UTILS)

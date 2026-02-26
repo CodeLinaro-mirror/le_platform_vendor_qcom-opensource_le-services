@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
+#define LOG_TAG "DmabufInterface"
+
 #include "qmmf_dmabuf_interface.h"
 
 #include <dlfcn.h>
@@ -10,9 +12,11 @@
 #include <linux/dma-heap.h>
 #include <sys/ioctl.h>
 #include <camx/camxformatutilexternal.h>
-#include "qmmf_common_utils.h"
+#include "common/cameraadaptor/qmmf_camera3_utils.h"
 
 using namespace qmmf;
+
+const char* kFormatUtilLibName = "libcamxexternalformatutils";
 
 const std::unordered_map<int32_t, int32_t> DMABufUsage::usage_flag_map_ = {
   {IMemAllocUsage::kHwCameraZsl,          GRALLOC_USAGE_HW_CAMERA_ZSL},
@@ -137,7 +141,7 @@ MemAllocError DMABufDevice::AllocBuffer(IBufferHandle& handle, int32_t width,
   handle = b;
 
   CamxPixelFormat cam_format = static_cast<CamxPixelFormat>(override_format);
-  res = CamxFormatUtil_GetBufferSize(cam_format, width, height, &size);
+  res = get_buffer_size_fn_(cam_format, width, height, &size);
   if (res != 0) {
     QMMF_ERROR("%s: failed to get size for DMA buffer: %d\n", __func__, res);
     delete b;
@@ -148,7 +152,7 @@ MemAllocError DMABufDevice::AllocBuffer(IBufferHandle& handle, int32_t width,
   if (format != HAL_PIXEL_FORMAT_BLOB) {
     CamxPlaneType plane_types[CamxFormatUtilMaxNumPlanes] = {};
     int plane_count;
-    res = CamxFormatUtil_GetPlaneTypes(cam_format, plane_types, &plane_count);
+    res = get_plane_types_fn_(cam_format, plane_types, &plane_count);
     if (res != 0) {
       QMMF_ERROR("%s: failed to get plane types for format: %d\n", __func__, res);
       delete b;
@@ -156,7 +160,7 @@ MemAllocError DMABufDevice::AllocBuffer(IBufferHandle& handle, int32_t width,
       return MemAllocError::kAllocFail;
     }
 
-    res = CamxFormatUtil_GetStrideInBytes(cam_format, plane_types[0],
+    res = get_stride_in_bytes_fn_(cam_format, plane_types[0],
                                           width, &p_stride);
     if (res != 0) {
       QMMF_ERROR("%s: failed to get stride for format: %d\n", __func__, res);
@@ -165,7 +169,7 @@ MemAllocError DMABufDevice::AllocBuffer(IBufferHandle& handle, int32_t width,
       return MemAllocError::kAllocFail;
     }
 
-    res = CamxFormatUtil_GetScanline(cam_format, plane_types[0],
+    res = get_scanline_fn_(cam_format, plane_types[0],
                                     height, &p_scanline);
     if (res != 0) {
       QMMF_ERROR("%s: failed to get stride for format: %d\n", __func__, res);
@@ -243,11 +247,75 @@ MemAllocError DMABufDevice::Perform(const IBufferHandle& handle,
 
 }
 
+bool DMABufDevice::LoadFormatUtil() {
+  std::string lib_name =
+      Target::GetLibName(std::string(kFormatUtilLibName), "0");
+
+  format_util_handle_ = dlopen(lib_name.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (!format_util_handle_) {
+    QMMF_ERROR("%s: dlopen failed for format util lib: %s with error %s",
+               __func__, lib_name, dlerror());
+    return false;
+  }
+
+  dlerror();
+
+  get_buffer_size_fn_ = reinterpret_cast<FormatUtilGetBufferSizeFn>(
+      dlsym(format_util_handle_, "CamxFormatUtil_GetBufferSize"));
+  get_plane_types_fn_ = reinterpret_cast<FormatUtilGetPlaneTypesFn>(
+      dlsym(format_util_handle_, "CamxFormatUtil_GetPlaneTypes"));
+  get_stride_in_bytes_fn_ = reinterpret_cast<FormatUtilGetStrideInBytesFn>(
+      dlsym(format_util_handle_, "CamxFormatUtil_GetStrideInBytes"));
+  get_scanline_fn_ = reinterpret_cast<FormatUtilGetScanlineFn>(
+      dlsym(format_util_handle_, "CamxFormatUtil_GetScanline"));
+
+  const char *err = dlerror();
+  if (err != nullptr || !get_buffer_size_fn_ || !get_plane_types_fn_ ||
+      !get_stride_in_bytes_fn_ || !get_scanline_fn_) {
+    QMMF_ERROR("%s: dlsym() failed for format Util symbols: %s", __func__,
+        err ? err : "missing symbol");
+    dlclose(format_util_handle_);
+    format_util_handle_ = nullptr;
+    get_buffer_size_fn_ = nullptr;
+    get_plane_types_fn_ = nullptr;
+    get_stride_in_bytes_fn_ = nullptr;
+    get_scanline_fn_ = nullptr;
+    return false;
+  }
+
+  return true;
+}
+
+void DMABufDevice::UnloadFormatUtil() {
+  if (format_util_handle_) {
+    dlclose(format_util_handle_);
+    format_util_handle_ = nullptr;
+  }
+  get_buffer_size_fn_ = nullptr;
+  get_plane_types_fn_ = nullptr;
+  get_stride_in_bytes_fn_ = nullptr;
+  get_scanline_fn_ = nullptr;
+}
+
 DMABufDevice::DMABufDevice() {
   dma_dev_fd_ = open("/dev/dma_heap/qcom,system", O_RDONLY | O_CLOEXEC);
+
+  if (dma_dev_fd_ < 0) {
+    QMMF_WARN ("%s: Failed to open /dev/dma_heap/qcom,system, "
+      "Falling back to /dev/dma_heap/system", __func__);
+    dma_dev_fd_ = open ("/dev/dma_heap/system", O_RDONLY | O_CLOEXEC);
+  }
+
+  if (dma_dev_fd_ < 0) {
+    QMMF_WARN ("%s: Failed to open /dev/dma_heap/system", __func__);
+  }
+
   assert(dma_dev_fd_ >= 0);
+
+  assert(LoadFormatUtil() && "LoadFormatUtil() failed");
 }
 
 DMABufDevice::~DMABufDevice() {
   close(dma_dev_fd_);
+  UnloadFormatUtil();
 }

@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.1)
-
 project(recorder-gtest)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FILE_OFFSET_BITS=64")
@@ -36,5 +34,5 @@ if(HAVE_ANDROID_UTILS)
 target_link_libraries(qmmf_recorder_gtest log utils cutils)
 else()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 -lpthread -lrt -lm -lglib-2.0 -ldl -latomic")
-target_link_libraries(qmmf_recorder_gtest qmmf_propertyvault)
+target_link_libraries(qmmf_recorder_gtest qmmf_config)
 endif()

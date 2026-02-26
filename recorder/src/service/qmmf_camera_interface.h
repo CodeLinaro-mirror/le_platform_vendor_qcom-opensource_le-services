@@ -48,7 +48,7 @@ struct StreamParam {
   uint32_t          width;
   uint32_t          height;
   BufferFormat      format;
-  VideoColorimetry  colorimetry;
+  Colorimetry       colorimetry;
   float             framerate;
   Rotation          rotation;
   uint32_t          xtrabufs;
@@ -56,7 +56,7 @@ struct StreamParam {
 
   StreamParam()
       :  id(0), width(0), height(0), format(BufferFormat::kUnsupported),
-         colorimetry(VideoColorimetry::kBT601), framerate(0.0),
+         colorimetry(Colorimetry::kBT601), framerate(0.0),
          rotation(Rotation::kNone), xtrabufs(0), flags(VideoFlags::kNone) {}
 };
 
@@ -66,10 +66,12 @@ struct SnapshotParam {
   uint32_t     height;
   uint32_t     quality;
   BufferFormat format;
+  Colorimetry  colorimetry;
   Rotation     rotation;
 
   SnapshotParam(): mode(ImageMode::kSnapshot), width(0), height(0), quality(95),
-      format(BufferFormat::kBLOB), rotation(Rotation::kNone) {}
+      format(BufferFormat::kBLOB), colorimetry(Colorimetry::kBT601),
+      rotation(Rotation::kNone) {}
 };
 
 class CameraInterface {
@@ -83,7 +85,8 @@ class CameraInterface {
                               const float framerate,
                               const CameraExtraParam& extra_param,
                               const ResultCb &cb = nullptr,
-                              const ErrorCb &errcb = nullptr) = 0;
+                              const ErrorCb &errcb = nullptr,
+                              const SystemCb &syscb = nullptr) = 0;
 
   /// Close the camera
   virtual status_t CloseCamera(const uint32_t camera_id) = 0;

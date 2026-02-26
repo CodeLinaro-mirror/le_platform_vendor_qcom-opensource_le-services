@@ -49,9 +49,9 @@
 #include <gbm_priv.h>
 #endif // USE_LIBGBM
 
-#include "common/utils/qmmf_common_utils.h"
+#include "common/utils/qmmf_common_utils_defs.h"
 #include "common/utils/qmmf_log.h"
-#include "recorder/src/client/qmmf_recorder_service_intf.h"
+#include "qmmf_recorder_service_intf.h"
 
 #ifdef USE_LIBGBM
 using gbm_perform_fnp = decltype(gbm_perform);
@@ -144,6 +144,9 @@ class RecorderClient {
                                     CameraMetadata &meta);
 
   status_t GetVendorTagDescriptor(std::shared_ptr<VendorTagDescriptor> &desc);
+
+  status_t GetOfflineParams(const OfflineCameraInputParams &in_params,
+                            OfflineCameraOutputParams &out_params);
 
   status_t CreateOfflineProcess(const OfflineCameraCreateParams &params,
                                 const OfflineCameraCb &cb);

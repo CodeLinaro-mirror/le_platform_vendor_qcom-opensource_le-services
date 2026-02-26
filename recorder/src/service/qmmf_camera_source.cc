@@ -43,7 +43,7 @@
 #include <hardware/camera3.h>
 #endif
 #ifndef HAVE_BINDER
-#include "common/utils/qmmf_common_utils.h"
+#include "common/cameraadaptor/qmmf_camera3_utils.h"
 #endif
 
 #include "recorder/src/service/qmmf_camera_source.h"
@@ -120,7 +120,8 @@ status_t CameraSource::StartCamera(const uint32_t camera_id,
                                    const float framerate,
                                    const CameraExtraParam& extra_param,
                                    const ResultCb &cb,
-                                   const ErrorCb &errcb) {
+                                   const ErrorCb &errcb,
+                                   const SystemCb &syscb) {
 
   QMMF_INFO("%s: Camera Id(%u) to open!", __func__, camera_id);
   QMMF_KPI_DETAIL();
@@ -153,7 +154,7 @@ status_t CameraSource::StartCamera(const uint32_t camera_id,
   start_cam_param_[camera_id] = extra_param;
   start_cam_param_lock_.unlock();
 
-  auto ret = camera->OpenCamera(camera_id, framerate, extra_param, cb, errcb);
+  auto ret = camera->OpenCamera(camera_id, framerate, extra_param, cb, errcb, syscb);
   if (ret != 0) {
     QMMF_ERROR("%s: OpenCamera(%d) Failed!", __func__, camera_id);
     active_cameras_lock_.lock();
@@ -269,6 +270,7 @@ status_t CameraSource::ConfigImageCapture(const uint32_t camera_id,
   sparam.format  = Common::FromImageToQmmfFormat(param.format);
   sparam.quality = param.quality;
   sparam.rotation = param.rotation;
+  sparam.colorimetry = param.colorimetry;
 
   auto ret = camera->ConfigImageCapture(image_id, sparam, xtraparam);
   if (ret != 0) {
@@ -367,7 +369,8 @@ bool CameraSource::ValidateSlaveTrackParam(
   QMMF_DEBUG("%s %d x %d -> %d x %d fmt 0x%x -> 0x%x", __func__,
       master_params.width, master_params.height,
       slave_params.width, slave_params.height,
-      master_params.format, slave_params.format);
+      static_cast<int32_t>(master_params.format),
+      static_cast<int32_t>(slave_params.format));
 
   if ((slave_params.format != VideoFormat::kNV12) &&
       (slave_params.format != VideoFormat::kNV12UBWC) &&
@@ -396,7 +399,8 @@ bool CameraSource::CheckLinkedStream(
   QMMF_DEBUG("%s %d x %d -> %d x %d fmt 0x%x -> 0x%x", __func__,
     master_params.width, master_params.height,
     slave_params.width, slave_params.height,
-    master_params.format, slave_params.format);
+    static_cast<int32_t>(master_params.format),
+    static_cast<int32_t>(slave_params.format));
 
   if ((slave_params.format != VideoFormat::kNV12) &&
       (slave_params.format != VideoFormat::kNV12UBWC) &&
@@ -813,7 +817,7 @@ const shared_ptr<TrackSource>& CameraSource::GetTrackSource(uint32_t track_id) {
 
 bool CameraSource::IsTrackIdValid(const uint32_t track_id) {
 
-  QMMF_DEBUG("%s: Number of Tracks exist: %d",__func__, track_sources_.size());
+  QMMF_DEBUG("%s: Number of Tracks exist: %ld",__func__, track_sources_.size());
   return (track_sources_.count(track_id) != 0) ? true : false;
 }
 
@@ -952,8 +956,11 @@ void CameraSource::SnapshotCallback(uint32_t image_id, uint32_t count,
   switch (buffer.info.format) {
     case BufferFormat::kNV12:
     case BufferFormat::kNV12HEIF:
+    case BufferFormat::kNV12UBWC:
     case BufferFormat::kNV21:
     case BufferFormat::kNV16:
+    case BufferFormat::kP010:
+    case BufferFormat::kTP10UBWC:
     case BufferFormat::kRAW8:
     case BufferFormat::kRAW10:
     case BufferFormat::kRAW12:
@@ -1358,7 +1365,7 @@ status_t TrackSource::StopTrack(bool cached) {
   QMMF_INFO("%s: Pipe stop done(%x)", __func__, id_);
   {
     std::lock_guard<std::mutex> lk(buffer_list_lock_);
-    QMMF_DEBUG("%s: Track(%x): buffer_list_.size(%d)", __func__,
+    QMMF_DEBUG("%s: Track(%x): buffer_list_.size(%ld)", __func__,
         id_, buffer_list_.size());
   }
 
@@ -1405,7 +1412,7 @@ void TrackSource::OnFrameAvailable(StreamBuffer& buffer) {
   }
 
   if (IsStop()) {
-    QMMF_DEBUG("%s: Track(%x): Stop is triggred, return buffer fd: %d ts: %lld",
+    QMMF_DEBUG("%s: Track(%x): Stop is triggred, return buffer fd: %d ts: %ld",
         __func__, id_, buffer.fd, buffer.timestamp);
 
     std::unique_lock<std::mutex> lock(frame_lock_);
@@ -1472,7 +1479,7 @@ status_t TrackSource::ReturnTrackBuffer(std::vector<BnBuffer>& bn_buffers) {
 
   std::unique_lock<std::mutex> lock(frame_lock_);
   for (size_t i = 0; i < bn_buffers.size(); ++i) {
-    QMMF_VERBOSE("%s: Track(%x): bn_buffers[%d].ion_fd=%d", __func__,
+    QMMF_VERBOSE("%s: Track(%x): bn_buffers[%ld].ion_fd=%d", __func__,
         id_, i, bn_buffers[i].ion_fd);
 
     std::lock_guard<std::mutex> autoLock(buffer_list_lock_);
@@ -1484,7 +1491,7 @@ status_t TrackSource::ReturnTrackBuffer(std::vector<BnBuffer>& bn_buffers) {
     ReturnBufferToProducer(buffer);
     buffer_list_.erase(it);
   }
-  QMMF_DEBUG("%s: Track(%x): buffer count still with client = %d", __func__,
+  QMMF_DEBUG("%s: Track(%x): buffer count still with client = %ld", __func__,
       id_, buffer_list_.size());
 
   if (buffer_list_.size() == 0) {
@@ -1530,11 +1537,11 @@ void TrackSource::EnableFrameRepeat(const bool enable) {
 }
 
 void TrackSource::ReturnBufferToProducer(StreamBuffer& buffer) {
-  QMMF_DEBUG("%s: Enter Track(%x): fd: %d ts: %lld", __func__,
+  QMMF_DEBUG("%s: Enter Track(%x): fd: %d ts: %ld", __func__,
       id_, buffer.fd, buffer.timestamp);
 
   if (buffer_map_.find(buffer.handle) == buffer_map_.end()) {
-    QMMF_ERROR("%s: Track(%x): fd: %d ts: %lld", __func__,
+    QMMF_ERROR("%s: Track(%x): fd: %d ts: %ld", __func__,
         id_, buffer.fd, buffer.timestamp);
   } else {
     QMMF_DEBUG("%s: Buffer is back to Producer Intf,buffer(0x%p) RefCount=%d",
@@ -1556,7 +1563,7 @@ void TrackSource::ReturnBufferToProducer(StreamBuffer& buffer) {
 }
 
 void TrackSource::NotifyBufferReturned(StreamBuffer& buffer) {
-  QMMF_DEBUG("%s: Enter Track(%x): fd: %d ts: %lld", __func__,
+  QMMF_DEBUG("%s: Enter Track(%x): fd: %d ts: %ld", __func__,
       id_, buffer.fd, buffer.timestamp);
   std::unique_lock<std::mutex> lock(frame_lock_);
   ReturnBufferToProducer(buffer);

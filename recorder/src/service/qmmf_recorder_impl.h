@@ -44,7 +44,7 @@
 #include <set>
 
 #include "qmmf-sdk/qmmf_camera_metadata.h"
-#include "recorder/src/client/qmmf_recorder_service_intf.h"
+#include "qmmf_recorder_service_intf.h"
 #include "recorder/src/service/qmmf_recorder_common.h"
 #include "recorder/src/service/qmmf_camera_source.h"
 #include "recorder/src/service/qmmf_remote_cb.h"
@@ -191,6 +191,10 @@ class RecorderImpl {
                                     const uint32_t camera_id,
                                     CameraMetadata &meta);
 
+  status_t GetOfflineParams(const uint32_t client_id,
+                            const OfflineCameraInputParams &in_params,
+                            OfflineCameraOutputParams &out_params);
+
   status_t CreateOfflineProcess(const uint32_t client_id,
                                 const OfflineCameraCreateParams& params);
 
@@ -218,6 +222,9 @@ class RecorderImpl {
 
   /// Camera Error callback handler
   void CameraErrorCb(uint32_t camera_id, uint32_t errcode);
+
+  /// Camera System callback handler
+  void CameraSystemCb(uint32_t camera_id, uint32_t errcode);
 
   // Get suitable trackid for linked stream
   uint32_t FindSuitableIdForLinkedTrack(const VideoTrackParam& params);

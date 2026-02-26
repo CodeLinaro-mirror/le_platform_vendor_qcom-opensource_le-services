@@ -1,12 +1,12 @@
-cmake_minimum_required(VERSION 3.1)
-
-include_directories(${SYSROOT_INCDIR})
-
-link_directories(${SYSROOT_LIBDIR})
+cmake_minimum_required(VERSION 3.16)
 
 project(qmmf-sdk)
 
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 17)
+
+set(BUILD_CATEGORY "ALL" CACHE STRING "Build Category")
 
 set(TOP_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
 
@@ -45,7 +45,8 @@ set(CMAKE_SHARED_LINKER_FLAGS
 set(CMAKE_STATIC_LINKER_FLAGS
     "${CMAKE_STATIC_LINKER_FLAGS} -Wl,-no-undefined")
 
-add_subdirectory(config/${TARGET_BOARD_PLATFORM})
+#Add default configuration
+add_subdirectory(config/common)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${PLATFORM_CXX_FLAGS}")
 
@@ -71,58 +72,92 @@ endif()
 
 if(HAVE_ANDROID_UTILS)
 add_compile_definitions(HAVE_ANDROID_UTILS)
-include_directories(${SYSROOT_INCDIR}/mm-core)
+include_directories(${CMAKE_SYSROOT}${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}/mm-core)
 else()
 # required for camera headers
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DLE_CAMERA")
-include_directories(${SYSROOT_INCDIR}/camx-api/camx/service)
-include_directories(${SYSROOT_INCDIR}/camx-api/camx/service/hardware)
-include_directories(${SYSROOT_INCDIR}/camx-api/camx/service/system)
-include_directories(${SYSROOT_INCDIR}/glib-2.0)
-include_directories(${SYSROOT_LIBDIR}/glib-2.0/include)
 endif()
 
 include_directories(${TOP_DIRECTORY}/include)
 
-add_subdirectory(qmmf-server)
+# === Common libs ===
+if (NOT HAVE_BINDER_H)
+add_subdirectory(common/proto)
+endif()
 
 add_subdirectory(common/camera-meta)
 
-add_subdirectory(recorder/src/service)
+if (NOT HAVE_ANDROID_UTILS)
+add_subdirectory(common/config)
+endif()
 
-add_subdirectory(recorder/test/gtest)
+add_subdirectory(common/utils)
 
+add_subdirectory(common/interfaces)
+
+# === Client ===
+if(RECORDER_CLIENT_ENABLED)
 add_subdirectory(recorder/src/client)
+endif()
 
-add_subdirectory(common/memory)
+# === Server ===
+if(QMMF_SERVER_ENABLED)
+add_subdirectory(qmmf-server)
+endif()
 
-add_subdirectory(common/cameraadaptor)
+# Using function to limit TARGET variables scope
+function(build_target TARGET_SUFFIX PLATFORM CAMX_INCLUDE_DIRS)
 
-if (NOT CAMERA_HAL1_SUPPORT)
+  # Use the two-arg form to give this subdir a unique binary dir per variant.
+  # Prevents CMake from reusing one build dir for different sources (avoids
+  # “binary directory already used to build a source directory” errors).
+  set(BINROOT "${CMAKE_BINARY_DIR}/${PLATFORM}")
+
+  #Load platform specific configuration
+  add_subdirectory("config/${PLATFORM}" "${BINROOT}/config/${PLATFORM}" )
+
+  add_subdirectory("recorder/src/service" "${BINROOT}/recorder/src/service")
+  add_subdirectory("common/memory" "${BINROOT}/common/memory")
+  add_subdirectory("common/cameraadaptor" "${BINROOT}/common/cameraadaptor")
+endfunction()
+
+# === Server Libs ===
+if(CAMERAADAPTOR_ENABLED AND RECORDER_SERVICE_ENABLED AND MEMORY_ENABLED)
+
+  # If TARGET_BOARD_PLATFORM is set, build specifically for
+  # that platform (qli 1.x)
+  if(DEFINED TARGET_BOARD_PLATFORM)
+    build_target("" ${TARGET_BOARD_PLATFORM} "")
+  else()
+    # Mainline build
+    # Camx include paths are defined in common config
+    build_target("_kodiak" "qcm6490" "${CAMX_KODIAK_INCLUDE_DIRS}")
+    # Using lemans config as common target
+    build_target("" "qcs9100" "${CAMX_TARGET_INCLUDE_DIRS}")
+  endif()
+
+endif()
+
+ if (RESIZER_FASTCV_ENABLED)
+    add_subdirectory(common/resizer-fastCV)
+ endif()
+
+ if (RESIZER_C2D_ENABLED)
+    add_subdirectory(common/resizer-c2d)
+ endif()
+
+ if (RESIZER_NEON_ENABLED)
+    add_subdirectory(common/resizer-neon)
+ endif()
+# === Tests ===
+if (NOT CAMERA_HAL1_SUPPORT AND CAMERAADAPTOR_GTEST_ENABLED)
 add_subdirectory(common/cameraadaptor/gtest)
+endif()
+
+if(RECORDER_GTEST_ENABLED)
+add_subdirectory(recorder/test/gtest)
 endif()
 
 if(ENABLE_CAMERA_FACTORY_TEST)
 add_subdirectory(common/cameraadaptor/test)
-endif()
-
-if (RESIZER_FASTCV_ENABLED)
-add_subdirectory(common/resizer-fastCV)
-endif()
-
-if (RESIZER_C2D_ENABLED)
-add_subdirectory(common/resizer-c2d)
-endif()
-
-if (RESIZER_NEON_ENABLED)
-add_subdirectory(common/resizer-neon)
-endif()
-
-if (NOT HAVE_ANDROID_UTILS)
-add_subdirectory(common/propertyvault)
-endif()
-add_subdirectory(common/utils)
-
-if (NOT HAVE_BINDER_H)
-add_subdirectory(common/proto)
 endif()

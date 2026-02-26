@@ -45,7 +45,7 @@
 #include "recorder/src/service/qmmf_recorder_utils.h"
 
 #ifndef HAVE_BINDER
-#include "common/propertyvault/qmmf_propertyvault.h"
+#include "common/config/qmmf_config.h"
 #endif
 #include "common/resizer-neon/qmmf_resizer_neon.h"
 #include "common/resizer-c2d/qmmf_resizer_c2d.h"
@@ -68,7 +68,7 @@ using ::std::chrono::duration_cast;
 CameraRescalerBase::CameraRescalerBase()
     :CameraRescalerThread() {
   QMMF_INFO("%s: Enter", __func__);
-  char prop[PROP_VALUE_MAX];
+  char prop[QMMF_PROP_VAL_MAX];
   memset(prop, 0, sizeof(prop));
 #ifdef HAVE_BINDER
 #ifdef ENABLE_RESCALER_NEON
@@ -245,7 +245,7 @@ bool CameraRescalerBase::ThreadLoop() {
     time_point<high_resolution_clock> curr_time = high_resolution_clock::now();
     uint64_t time_diff = duration_cast<microseconds>
                              (curr_time - start_time).count();
-    QMMF_INFO("%s: stream_id(%d) Full ProcessingTime=%lld",
+    QMMF_INFO("%s: stream_id(%d) Full ProcessingTime=%ld",
         __func__, in_buffer.stream_id, time_diff);
   }
 
@@ -758,10 +758,10 @@ status_t CameraRescalerMemPool::AllocHWMemBuffer(IBufferHandle &buf) {
   MemAllocError ret = alloc_device_interface_->AllocBuffer(buf,
 #ifdef HAVE_BINDER
       static_cast<int>(width), static_cast<int>(height), format, usage, &stride,
-      static_cast<uint32_t>(VideoColorimetry::kBT601));
+      static_cast<uint32_t>(Colorimetry::kBT601));
 #else
       static_cast<int>(width), static_cast<int>(height), format, 0, usage, &stride,
-      static_cast<uint32_t>(VideoColorimetry::kBT601));
+      static_cast<uint32_t>(Colorimetry::kBT601));
 #endif
   if (MemAllocError::kAllocOk != ret) {
     QMMF_ERROR("%s: Failed to allocate alloc buffer", __func__);

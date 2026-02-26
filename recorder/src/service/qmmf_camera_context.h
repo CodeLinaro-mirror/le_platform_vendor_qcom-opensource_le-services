@@ -40,6 +40,7 @@
 #include <qmmf-sdk/qmmf_recorder_extra_param_tags.h>
 
 #include "common/utils/qmmf_condition.h"
+#include "qmmf_camera3_device_intf.h"
 #include "common/cameraadaptor/qmmf_camera3_device_client.h"
 #include "recorder/src/service/qmmf_camera_interface.h"
 
@@ -88,7 +89,8 @@ class CameraContext : public CameraInterface {
   status_t OpenCamera(const uint32_t camera_id, const float frame_rate,
                       const CameraExtraParam& extra_param,
                       const ResultCb &cb = nullptr,
-                      const ErrorCb &errcb = nullptr) override;
+                      const ErrorCb &errcb = nullptr,
+                      const SystemCb &syscb = nullptr) override;
 
   status_t CloseCamera(const uint32_t camera_id) override;
 
@@ -251,6 +253,8 @@ class CameraContext : public CameraInterface {
 
   void CameraResultCb(const CaptureResult &result);
 
+  void CameraSystemCb(uint32_t errcode);
+
   uint32_t GetROICountTag () { return multi_roi_count_tag_; }
 
   uint32_t GetROIInfoTag () { return multi_roi_info_tag_; }
@@ -317,7 +321,7 @@ class CameraContext : public CameraInterface {
 
   ResultCb                 result_cb_;
   ErrorCb                  error_cb_;
-
+  SystemCb                 system_cb_;
   std::vector<int32_t>     supported_fps_;
   uint32_t                 zsl_port_id_;
   uint32_t                 reproc_port_id_;
@@ -353,7 +357,7 @@ class CameraContext : public CameraInterface {
   std::mutex               partial_result_lock_;
 
   // snapshot configuration
-  
+
   // <stream id, image id>
   std::map<uint32_t, uint32_t>  stream_image_map_;
   std::mutex                    stream_image_lock_;

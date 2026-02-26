@@ -22,6 +22,7 @@
  * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
+#define LOG_TAG "Camera3Stream"
 
 #include "qmmf_camera3_utils.h"
 #include "qmmf_camera3_monitor.h"
@@ -45,11 +46,7 @@
 #define MMM_COLOR_FMT_UV_META_SCANLINES VENUS_UV_META_SCANLINES
 #endif
 
-#ifdef HAVE_ANDROID_UTILS
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
-#endif // HAVE_ANDROID_UTILS
-
-#define LOG_TAG "Camera3Stream"
 
 namespace qmmf {
 
@@ -89,14 +86,20 @@ Camera3Stream::Camera3Stream(int id, size_t maxSize,
   camera3_stream::width = outputConfiguration.width;
   camera3_stream::height = outputConfiguration.height;
   camera3_stream::format = outputConfiguration.format;
-  camera3_stream::data_space = outputConfiguration.data_space;
-  data_space_ = outputConfiguration.data_space;
+  camera3_stream::data_space =
+      static_cast<android_dataspace>(outputConfiguration.data_space);
+  data_space_ = static_cast<android_dataspace>(outputConfiguration.data_space);
+#if defined(CAMX_ANDROID_API) && (CAMX_ANDROID_API >= 33)
+  camera3_stream::color_space = outputConfiguration.color_space;
+  color_space_ = outputConfiguration.color_space;
+#endif
 #if defined(CAMX_ANDROID_API) && (CAMX_ANDROID_API >= 31)
   camera3_stream::stream_use_case = outputConfiguration.usecase;
   camera3_stream::dynamic_range_profile = outputConfiguration.hdrmode;
   hdrmode_ = outputConfiguration.hdrmode;
 #endif
-  camera3_stream::rotation = outputConfiguration.rotation;
+  camera3_stream::rotation =
+      static_cast<camera3_stream_rotation_t>(outputConfiguration.rotation);
   camera3_stream::usage =
     AllocUsageFactory::GetAllocUsage().ToGralloc(outputConfiguration.allocFlags);
   camera3_stream::max_buffers = outputConfiguration.bufferCount;
@@ -535,16 +538,16 @@ int32_t Camera3Stream::PopulateBufferMeta(BufferMeta &info,
                                       static_cast<void*>(&stride));
 
   if (MemAllocError::kAllocOk != ret) {
-    QMMF_ERROR("%s: Error in GetStrideAndHeightFromHandle() : %d\n", __func__,
-               ret);
+    QMMF_ERROR("%s: Error in GetStrideAndHeightFromHandle() : %ld\n", __func__,
+               static_cast<int64_t>(ret));
     return -EINVAL;
   }
   ret = mem_alloc_interface_->Perform(handle,
                             IAllocDevice::AllocDeviceAction::GetAlignedHeight,
                             static_cast<void*>(&scanline));
   if (MemAllocError::kAllocOk != ret) {
-    QMMF_ERROR("%s: Error in GetStrideAndHeightFromHandle() : %d\n", __func__,
-               ret);
+    QMMF_ERROR("%s: Error in GetStrideAndHeightFromHandle() : %ld\n", __func__,
+               static_cast<int64_t>(ret));
     return -EINVAL;
   }
 
@@ -925,7 +928,7 @@ void Camera3Stream::ReturnBufferToClient(const camera3_stream_buffer &buffer,
     callbacks_(b);
   } else {
     QMMF_WARN("%s: Got buffer(%p) from stream(%d), frame_number(%u) and "
-        " ts(%lld) with error status!", __func__, b.handle, b.stream_id,
+        " ts(%ld) with error status!", __func__, b.handle, b.stream_id,
         b.frame_number, b.timestamp);
     ReturnBuffer(b);
   }
@@ -1094,20 +1097,25 @@ int32_t Camera3Stream::GetBufferLocked(camera3_stream_buffer *streamBuffer) {
           IMemAllocUsage::kHwCameraWrite);
     }
 
-    VideoColorimetry colorimetry = VideoColorimetry::kBT601;
+    Colorimetry colorimetry = Colorimetry::kBT601;
 
 #if defined(CAMX_ANDROID_API) && (CAMX_ANDROID_API >= 31)
     if (hdrmode_ == 0) {
-      colorimetry = VideoColorimetry::kBT601;
+      colorimetry = Colorimetry::kBT601;
     } else if (hdrmode_ == ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_HLG10) {
-      colorimetry = VideoColorimetry::kBT2100HLGFULL;
+      colorimetry = Colorimetry::kBT2100HLGFULL;
     } else if (hdrmode_ == ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_HDR10) {
-      colorimetry = VideoColorimetry::kBT2100PQFULL;
+      colorimetry = Colorimetry::kBT2100PQFULL;
     } else if (hdrmode_ ==  ANDROID_REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES_MAP_STANDARD) {
-      if (data_space_ == HAL_DATASPACE_BT601_525) {
-        colorimetry = VideoColorimetry::kBT601FULL;
-      } else if (data_space_ == HAL_DATASPACE_BT709) {
-        colorimetry = VideoColorimetry::kBT709FULL;
+      if (data_space_ == HAL_DATASPACE_BT601_525
+#if defined(ENABLE_IMAGE_NV12)
+        || ((data_space_ == HAL_DATASPACE_UNKNOWN ||
+          data_space_ == HAL_DATASPACE_HEIF) && color_space_ == 0)
+#endif
+        ) {
+        colorimetry = Colorimetry::kBT601FULL;
+      } else if (data_space_ == HAL_DATASPACE_BT709 || color_space_ == 4) {
+        colorimetry = Colorimetry::kBT709FULL;
       } else {
         QMMF_ERROR("%s: Data space is not found in MAP_STANDARD.\n", __func__);
         return -ENOSYS;
@@ -1117,7 +1125,7 @@ int32_t Camera3Stream::GetBufferLocked(camera3_stream_buffer *streamBuffer) {
     }
 #endif
 
-    QMMF_INFO("%s: Select VideoColorimetry = %d", __func__, colorimetry);
+    QMMF_INFO("%s: Select Colorimetry = %ld", __func__, static_cast<int64_t>(colorimetry));
 
     MemAllocError ret = mem_alloc_interface_->AllocBuffer(
         handle,
@@ -1231,7 +1239,7 @@ int32_t Camera3Stream::CloseLocked() {
   }
 
   if (pending_buffer_count_ > 0) {
-    QMMF_ERROR("%s: Can't disconnect with %zu buffers still dequeued!\n",
+    QMMF_ERROR("%s: Can't disconnect with %u buffers still dequeued!\n",
                __func__, pending_buffer_count_);
     auto it = mem_alloc_buffers_.begin();
     int32_t i = 0;

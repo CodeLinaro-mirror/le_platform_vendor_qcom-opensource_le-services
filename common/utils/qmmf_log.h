@@ -43,11 +43,12 @@
 #include <cutils/properties.h>
 #include <cutils/trace.h>
 #else
-#include <log.h>
-#include "properties.h"
+#include <syslog.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <cstdint>
+#include "common/config/qmmf_config.h"
 #endif
 
 #undef assert
@@ -62,11 +63,6 @@
 
 #define LOG_LEVEL_KPI
 
-// INFO, ERROR and WARN logs are enabled by default
-#define QMMF_INFO(fmt, args...)  ALOGI(fmt, ##args)
-#define QMMF_WARN(fmt, args...)  ALOGW(fmt, ##args)
-#define QMMF_ERROR(fmt, args...) ALOGE(fmt, ##args)
-
 static inline void unused(...) {};
 
 extern uint32_t qmmf_log_level;
@@ -79,7 +75,7 @@ int qmmf_property_set(const char *key, const char *value);
 #ifdef HAVE_ANDROID_UTILS
 #define QMMF_GET_LOG_LEVEL()                               \
   ({                                                       \
-    char prop[PROPERTY_VALUE_MAX];                         \
+    char prop[QMMF_PROP_VAL_MAX];                         \
     property_get("persist.qmmf.sdk.log.level", prop, "0"); \
     qmmf_log_level = atoi(prop);                           \
   })
@@ -89,13 +85,13 @@ int qmmf_property_set(const char *key, const char *value);
 #else
 #define QMMF_GET_LOG_LEVEL()                               \
   ({                                                       \
-    char prop[PROP_VALUE_MAX];                         \
+    char prop[QMMF_PROP_VAL_MAX];                         \
     qmmf_property_get("persist.qmmf.sdk.log.level", prop, "0"); \
     qmmf_log_level = atoi(prop);                           \
   })
 #define QMMF_INFO(fmt, args...)  syslog (LOG_INFO, "[INFO]: %s : " fmt, LOG_TAG, ##args)
 #define QMMF_WARN(fmt, args...)  syslog (LOG_WARNING, "[WARN]: %s : " fmt, LOG_TAG, ##args)
-#define QMMF_ERROR(fmt, args...) syslog (LOG_ERROR, "[ERROR]: %s : " fmt, LOG_TAG, ##args)
+#define QMMF_ERROR(fmt, args...) syslog (LOG_PERROR, "[ERROR]: %s : " fmt, LOG_TAG, ##args)
 
 #define QMMF_DEBUG(fmt, args...)                \
   ({                                            \
@@ -128,7 +124,7 @@ property_get("persist.qmmf.kpi.debug", prop, std::to_string(BASE_KPI_FLAG).c_str
 kpi_debug_level = atoi (prop);})
 #else
 #define QMMF_KPI_GET_MASK() ({\
-char prop[PROP_VALUE_MAX];\
+char prop[QMMF_PROP_VAL_MAX];\
 qmmf_property_get("persist.qmmf.kpi.debug", prop,\
   std::to_string(DEFAULT_KPI_FLAG).c_str()); \
 kpi_debug_level = atoi (prop);})
@@ -142,7 +138,8 @@ static inline int get_ftrace_fd(void) {
 
 static inline void ftrace_write(const char *log, size_t len) {
   auto fd = get_ftrace_fd();
-  write(fd, log, len);
+  auto res = write(fd, log, len);
+  (void)res;
 }
 
 static inline void ftrace_begin(const char* name) {

@@ -31,9 +31,17 @@
 * SPDX-License-Identifier: BSD-3-Clause-Clear
 */
 
+#define LOG_TAG "RecorderExtraParam"
+
 #include <algorithm>
 
 #include "qmmf-sdk/qmmf_recorder_extra_param.h"
+
+#ifdef HAVE_ANDROID_UTILS
+#include <utils/Log.h>
+#else
+#include <common/utils/qmmf_log.h>
+#endif
 
 namespace qmmf {
 
@@ -77,7 +85,7 @@ ExtraParam &ExtraParam::operator=(const ExtraParam &other) {
 int32_t ExtraParam::Clear() {
 
   if (locked_) {
-    ALOGE("%s: Can't clear a locked Container!", __func__);
+    QMMF_ERROR("%s: Can't clear a locked Container!", __func__);
     return -EPERM;
   }
   data_map_.clear();
@@ -111,7 +119,7 @@ int32_t ExtraParam::Remove(uint32_t tag, uint32_t entry) {
 
   auto ret = RemoveDataEntry(tag, entry);
   if (0 != ret) {
-    ALOGE("%s: Failed to remove tag %u, entry %u!", __func__, tag, entry);
+    QMMF_ERROR("%s: Failed to remove tag %u, entry %u!", __func__, tag, entry);
     return ret;
   }
   return 0;
@@ -121,7 +129,7 @@ int32_t ExtraParam::Erase(uint32_t tag) {
 
   auto ret = EraseDataTag(tag);
   if (0 != ret) {
-    ALOGE("%s: Failed to erase tag %u!", __func__, tag);
+    QMMF_ERROR("%s: Failed to erase tag %u!", __func__, tag);
     return ret;
   }
   return 0;
@@ -130,7 +138,7 @@ int32_t ExtraParam::Erase(uint32_t tag) {
 int32_t ExtraParam::Acquire(const void *data, const size_t &size) {
 
   if (locked_) {
-    ALOGE("%s: Assignment to a locked Container!", __func__);
+    QMMF_ERROR("%s: Assignment to a locked Container!", __func__);
     return -EPERM;
   }
 
@@ -182,11 +190,11 @@ const void* ExtraParam::GetAndLock() const {
 int32_t ExtraParam::ReturnAndUnlock(const void *data) const {
 
   if (!locked_) {
-    ALOGE("%s: Can't unlock a non-locked Container!", __func__);
+    QMMF_ERROR("%s: Can't unlock a non-locked Container!", __func__);
     return -EPERM;
   }
   if (data != reinterpret_cast<const void*>(data_buffer_.data())) {
-    ALOGE("%s: Can't unlock Container with wrong pointer!", __func__);
+    QMMF_ERROR("%s: Can't unlock Container with wrong pointer!", __func__);
     return -EINVAL;
   }
   locked_ = false;
@@ -201,16 +209,16 @@ size_t ExtraParam::Size() const {
 int32_t ExtraParam::RemoveDataEntry(uint32_t &tag, uint32_t &entry) {
 
   if (locked_) {
-    ALOGE("%s: Can't remove entry from a locked Container!", __func__);
+    QMMF_ERROR("%s: Can't remove entry from a locked Container!", __func__);
     return -EPERM;
   }
 
   auto it = data_map_.find(tag);
   if (it == data_map_.end()) {
-    ALOGE("%s: Tag %u does not exist!", __func__, tag);
+    QMMF_ERROR("%s: Tag %u does not exist!", __func__, tag);
     return -EINVAL;
   } else if (it->second.size() <= entry) {
-    ALOGE("%s: Entry %u does not exist!", __func__, entry);
+    QMMF_ERROR("%s: Entry %u does not exist!", __func__, entry);
     return -EINVAL;
   }
 
@@ -231,7 +239,7 @@ int32_t ExtraParam::RemoveDataEntry(uint32_t &tag, uint32_t &entry) {
 
   auto ret = ReorganizeDataMap(entry_offset);
   if (0 != ret) {
-    ALOGE("%s: Failed to reorganize data mapping!", __func__);
+    QMMF_ERROR("%s: Failed to reorganize data mapping!", __func__);
     return ret;
   }
 
@@ -242,12 +250,12 @@ int32_t ExtraParam::RemoveDataEntry(uint32_t &tag, uint32_t &entry) {
 int32_t ExtraParam::EraseDataTag(uint32_t &tag) {
 
   if (locked_) {
-    ALOGE("%s: Can't erase tag from a locked Container!", __func__);
+    QMMF_ERROR("%s: Can't erase tag from a locked Container!", __func__);
     return -EPERM;
   }
 
   if (data_map_.find(tag) == data_map_.end()) {
-    ALOGE("%s: Tag %u does not exist!", __func__, tag);
+    QMMF_ERROR("%s: Tag %u does not exist!", __func__, tag);
     return -EINVAL;
   }
 
@@ -275,7 +283,7 @@ int32_t ExtraParam::EraseDataTag(uint32_t &tag) {
 
   auto ret = ReorganizeDataMap(memory_offset);
   if (0 != ret) {
-    ALOGE("%s: Failed to reorganize data mapping!", __func__);
+    QMMF_ERROR("%s: Failed to reorganize data mapping!", __func__);
     return ret;
   }
 
@@ -295,10 +303,10 @@ int32_t ExtraParam::ReorganizeDataMap(uintptr_t entry_offset) {
     // data_buffer_ should be in data_map_.
     auto it = data_map_.find(desc->tag_id);
     if (it == data_map_.end()) {
-      ALOGE("%s: Tag %u does not exist!", __func__, desc->tag_id);
+      QMMF_ERROR("%s: Tag %u does not exist!", __func__, desc->tag_id);
       return -EFAULT;
     } else if (it->second.size() <= desc->entry_id) {
-      ALOGE("%s: Entry %u does not exist!", __func__, desc->entry_id);
+      QMMF_ERROR("%s: Entry %u does not exist!", __func__, desc->entry_id);
       return -EFAULT;
     }
     data_map_.at(desc->tag_id).at(desc->entry_id) = entry_offset;

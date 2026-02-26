@@ -34,13 +34,26 @@
 #define LOG_TAG "RecorderService"
 
 #ifndef HAVE_BINDER
-#include "common/propertyvault/qmmf_propertyvault.h"
+#include "common/config/qmmf_config.h"
 #endif
 #include "recorder/src/service/qmmf_recorder_service.h"
 
 namespace qmmf {
 
 namespace recorder {
+
+extern "C" {
+
+int CreateRecorderServiceInstance(void) {
+  QMMF_INFO("%s: Starting RecorderService main loop", __func__);
+
+  qmmf::recorder::RecorderService server;
+  server.MainLoop();
+
+  QMMF_INFO("%s: RecorderService main loop exited", __func__);
+  return 0;
+}
+}
 
 #ifndef HAVE_BINDER
 ThreadPool::ThreadPool()
@@ -597,6 +610,29 @@ status_t RecorderService::onTransact(uint32_t code, const Parcel& data,
         return 0;
       }
       break;
+      case RECORDER_GET_OFFLINE_PARAMS: {
+        uint32_t client_id, in_params_blob_size;
+        data.readUint32(&client_id);
+        data.readUint32(&in_params_blob_size);
+        android::Parcel::ReadableBlob in_params_blob;
+        data.readBlob(in_params_blob_size, &in_params_blob);
+        OfflineCameraInputParams in_params;
+        assert(in_params_blob_size == sizeof(in_params));
+        memcpy(&in_params, in_params_blob.data(), in_params_blob_size);
+
+        OfflineCameraOutputParams out_params;
+        ret = GetOfflineParams(client_id, in_params, out_params);
+        reply->writeInt32(ret);
+        if (NO_ERROR == ret) {
+          uint32_t out_params_blob_size = sizeof(out_params);
+          reply->writeUint32(out_params_blob_size);
+          android::Parcel::WritableBlob blob;
+          reply->writeBlob(out_params_blob_size, false, &blob);
+          memcpy(blob.data(), &out_params, out_params_blob_size);
+        }
+        return 0;
+      }
+      break;
       case RECORDER_CONFIGURE_OFFLINE_PROC: {
         uint32_t client_id, proc_params_blob_size;
         data.readUint32(&client_id);
@@ -791,7 +827,7 @@ status_t RecorderService::Connect(const sp<IRecorderServiceCallback>&
 }
 #else
 status_t RecorderService::SetupSocket() {
-  socket_path_ = "/tmp/socket/cam_server/le_cam_socket";
+  socket_path_ = "/run/cam_server/le_cam_socket";
 
   if (unlink(socket_path_.c_str()) == -1) {
     QMMF_WARN("%s: unlink failure for path(%s) %s, errno: %d", __func__,
@@ -845,19 +881,21 @@ status_t RecorderService::ReadRequest (int socket, void *buffer, size_t size) {
   ssize_t bytes_read = recv(socket, buffer, size, 0);
 
   if (bytes_read > 0) {
-    QMMF_VERBOSE("%s: read %d bytes from client socket: %d",
-                 __func__, bytes_read, socket);
-    return bytes_read;
+    QMMF_VERBOSE("%s: read %zd bytes from client socket: %d",
+        __func__, bytes_read, socket);
+    return static_cast<status_t>(bytes_read);
   }
 
   if (bytes_read == -1) {
     QMMF_ERROR("%s: Receive failed: %s", __func__, strerror(errno));
     return -errno;
   } else if (bytes_read == 0) {
-    QMMF_ERROR("%s: connection closed: %d ", __func__, socket);
+    QMMF_ERROR("%s: connection closed: %d", __func__, socket);
     CheckClientDeath(client_sockets_[socket]);
     return 0;
   }
+
+  return -EINVAL;
 }
 
 status_t RecorderService::SendResponse (int socket, void *buffer, size_t size) {
@@ -1056,10 +1094,10 @@ void RecorderService::ProcessRequest(int client_socket, RecorderClientReqMsg req
         RECORDER_SERVICE_CMDS::RECORDER_GET_CAMERA_CHARACTERISTICS);
     resp_msg.set_status(ret);
     const camera_metadata_t *meta_buffer = meta.getAndLock();
-    uint32_t size = get_camera_metadata_compact_size(meta_buffer);
+    uint32_t size = CameraMetadata::get_camera_metadata_compact_size(meta_buffer);
     std::string *data = new std::string;
     data->resize(size);
-    auto copy_ptr = copy_camera_metadata (&data->at(0), data->size(), meta_buffer);
+    auto copy_ptr = CameraMetadata::copy_camera_metadata (&data->at(0), data->size(), meta_buffer);
     if (copy_ptr) {
       resp_msg.mutable_get_camera_characteristics_resp()->set_allocated_meta(data);
     } else {
@@ -1083,11 +1121,11 @@ void RecorderService::ProcessRequest(int client_socket, RecorderClientReqMsg req
     uint32_t size = meta.size();
     for (uint32_t i = 0; i < size; i++) {
       const camera_metadata_t *meta_buffer = meta[i].getAndLock();
-      uint32_t size = get_camera_metadata_compact_size (meta_buffer);
+      uint32_t size = CameraMetadata::get_camera_metadata_compact_size (meta_buffer);
       std::string *data =
           resp_msg.mutable_get_cam_static_info_resp()->add_caps();
       data->resize(size);
-      copy_camera_metadata (&data->at(0), data->size(), meta_buffer);
+      CameraMetadata::copy_camera_metadata (&data->at(0), data->size(), meta_buffer);
       const_cast<CameraMetadata&>(meta[i]).unlock(meta_buffer);
     }
     break;
@@ -1105,10 +1143,10 @@ void RecorderService::ProcessRequest(int client_socket, RecorderClientReqMsg req
         RECORDER_SERVICE_CMDS::RECORDER_GET_CAMERA_PARAMS);
     resp_msg.set_status(ret);
     const camera_metadata_t *meta_buffer = meta.getAndLock();
-    uint32_t size = get_camera_metadata_compact_size(meta_buffer);
+    uint32_t size = CameraMetadata::get_camera_metadata_compact_size(meta_buffer);
     std::string *data = new std::string;
     data->resize(size);
-    auto copy_ptr = copy_camera_metadata (&data->at(0), data->size(), meta_buffer);
+    auto copy_ptr = CameraMetadata::copy_camera_metadata (&data->at(0), data->size(), meta_buffer);
     if (copy_ptr) {
       resp_msg.mutable_get_camera_param_resp()->set_allocated_meta(data);
     } else {
@@ -1129,7 +1167,7 @@ void RecorderService::ProcessRequest(int client_socket, RecorderClientReqMsg req
     const std::string& data = req_msg.set_camera_param().meta();
     uint8_t *raw_buf = new uint8_t[data.size()];
     camera_metadata_t *meta_buffer =
-        copy_camera_metadata (raw_buf, data.size(), reinterpret_cast<const camera_metadata_t *>(data.data()));
+        CameraMetadata::copy_camera_metadata (raw_buf, data.size(), reinterpret_cast<const camera_metadata_t *>(data.data()));
     if (meta_buffer) {
       meta.clear();
       meta.acquire(meta_buffer);
@@ -1152,7 +1190,7 @@ void RecorderService::ProcessRequest(int client_socket, RecorderClientReqMsg req
     const std::string& data = req_msg.set_camera_session_param().meta();
     uint8_t *raw_buf = new uint8_t[data.size()];
     camera_metadata_t *meta_buffer =
-        copy_camera_metadata (raw_buf, data.size(), reinterpret_cast<const camera_metadata_t *>(data.data()));
+        CameraMetadata::copy_camera_metadata (raw_buf, data.size(), reinterpret_cast<const camera_metadata_t *>(data.data()));
     if (meta_buffer) {
       meta.clear();
       meta.acquire(meta_buffer);
@@ -1191,7 +1229,7 @@ void RecorderService::ProcessRequest(int client_socket, RecorderClientReqMsg req
       CameraMetadata meta;
       uint8_t *raw_buf = new uint8_t[meta_proto.size()];
       camera_metadata_t *meta_buffer =
-          copy_camera_metadata (raw_buf, meta_proto.size(), reinterpret_cast<const camera_metadata_t *>(meta_proto.data()));
+          CameraMetadata::copy_camera_metadata (raw_buf, meta_proto.size(), reinterpret_cast<const camera_metadata_t *>(meta_proto.data()));
       meta.clear();
       meta.acquire(meta_buffer);
       meta_array.push_back(meta);
@@ -1274,10 +1312,10 @@ void RecorderService::ProcessRequest(int client_socket, RecorderClientReqMsg req
         RECORDER_SERVICE_CMDS::RECORDER_GET_DEFAULT_CAPTURE_PARAMS);
     resp_msg.set_status(ret);
     const camera_metadata_t *meta_buffer = meta.getAndLock();
-    uint32_t size = get_camera_metadata_compact_size(meta_buffer);
+    uint32_t size = CameraMetadata::get_camera_metadata_compact_size(meta_buffer);
     std::string *data = new std::string;
     data->resize(size);
-    auto copy_ptr = copy_camera_metadata (&data->at(0), data->size(), meta_buffer);
+    auto copy_ptr = CameraMetadata::copy_camera_metadata (&data->at(0), data->size(), meta_buffer);
     if (copy_ptr) {
       resp_msg.mutable_get_default_capture_param_resp()->set_allocated_meta(data);
     } else {
@@ -1285,6 +1323,18 @@ void RecorderService::ProcessRequest(int client_socket, RecorderClientReqMsg req
       resp_msg.set_status(-1);
     }
     meta.unlock(meta_buffer);
+    break;
+  }
+  case RECORDER_SERVICE_CMDS::RECORDER_GET_SUPPORTED_INTERFACE_VER:
+  {
+    // sending response
+    resp_msg.set_command(
+        RECORDER_SERVICE_CMDS::RECORDER_GET_SUPPORTED_INTERFACE_VER);
+    resp_msg.set_status(0);
+
+    // Add here MD5 sums of more supported qmmf.proto contents
+    resp_msg.mutable_get_supported_interface_ver_resp()->
+        add_vers(QMMF_CURRENT_INTERFACE_VER);
     break;
   }
 
@@ -1312,7 +1362,7 @@ void RecorderService::ParseRequest(int client_socket,
   size_t buf_size = size;
   auto buf_ptr = recv_buf;
   while (buf_size > 0) {
-    QMMF_VERBOSE("%s: buf_size: %d", __func__, buf_size);
+    QMMF_VERBOSE("%s: buf_size: %ld", __func__, buf_size);
     uint32_t msg_size = *(reinterpret_cast<uint32_t *>(buf_ptr));
     // Moving past the size
     buf_ptr += 4;
@@ -1951,6 +2001,22 @@ status_t RecorderService::GetCameraCharacteristics(const uint32_t client_id,
   return 0;
 }
 
+status_t RecorderService::GetOfflineParams(const uint32_t client_id,
+                                           const OfflineCameraInputParams &in_params,
+                                           OfflineCameraOutputParams &out_params) {
+  QMMF_INFO("%s:Enter client_id(%d)", __func__, client_id);
+  if (!IsRecorderInitialized()) {
+    QMMF_ERROR("%s: Recorder not initialized!", __func__);
+    return -ENODEV;
+  }
+  auto ret = recorder_->GetOfflineParams(client_id, in_params, out_params);
+  if (ret != 0) {
+    QMMF_ERROR("%s: Can't get OfflineCameraParams!", __func__);
+  }
+  QMMF_INFO("%s: Exit client_id(%d)", __func__, client_id);
+  return ret;
+}
+
 status_t RecorderService::CreateOfflineProcess(
                                   const uint32_t client_id,
                                   const OfflineCameraCreateParams &params) {
@@ -2103,7 +2169,7 @@ status_t RecorderServiceCallbackProxy::Init (uint32_t client_id) {
   QMMF_INFO("%s: Enter ", __func__);
 
   std::stringstream ss;
-  ss << "/tmp/socket/cam_server/le_cam_client." << client_id << ".sock";
+  ss << "/run/cam_server/le_cam_client." << client_id << ".sock";
   std::string socket_path = ss.str();
 
   QMMF_INFO("Connecting to... %s", socket_path.c_str());
@@ -2131,7 +2197,7 @@ status_t RecorderServiceCallbackProxy::Init (uint32_t client_id) {
   }
 
   client_id_ = client_id;
-  QMMF_INFO("%s: Exit client_id(%d) (0x%p)", __func__, client_id_);
+  QMMF_INFO("%s: Exit client_id(%d) (0x%x)", __func__, client_id_, client_id_);
   return 0;
 }
 
@@ -2211,7 +2277,7 @@ void RecorderServiceCallbackProxy::SendCallbackData(RecorderClientCallbacksAsync
     QMMF_ERROR("%s: sendmsg failed: %s", __func__, strerror(errno));
     close(callback_socket_);
   } else {
-    QMMF_DEBUG("%s: Sent %zd bytes (expected %u)", __func__, bytes_sent, buf_size);
+    QMMF_DEBUG("%s: Sent %zd bytes (expected %lu)", __func__, bytes_sent, buf_size);
   }
 
   QMMF_DEBUG("%s Exit", __func__);
@@ -2252,8 +2318,18 @@ void RecorderServiceCallbackProxy::NotifySnapshotData(uint32_t camera_id, uint32
   snapshot_msg->set_img_count(imgcount);
   BufferInfoMsg* buffer_info = snapshot_msg->mutable_buffer();
 
-  buffer_info->set_ion_fd(bn_buffer.ion_fd);
-  buffer_info->set_ion_meta_fd(bn_buffer.ion_meta_fd);
+  {
+    std::lock_guard<std::mutex> l(snapshot_buffers_lock_);
+    if (snapshot_buffers_.count(bn_buffer.buffer_id) != 0) {
+      buffer_info->set_ion_fd(-1);
+      buffer_info->set_ion_meta_fd(-1);
+    } else {
+      buffer_info->set_ion_fd(bn_buffer.ion_fd);
+      buffer_info->set_ion_meta_fd(bn_buffer.ion_meta_fd);
+      snapshot_buffers_.emplace(bn_buffer.buffer_id);
+    }
+  }
+
   buffer_info->set_img_id(bn_buffer.img_id);
   buffer_info->set_size(bn_buffer.size);
   buffer_info->set_timestamp(bn_buffer.timestamp);
@@ -2386,7 +2462,7 @@ void RecorderServiceCallbackProxy::NotifyCameraResult(
     return;
   }
 
-  uint32_t size = get_camera_metadata_compact_size(meta_buffer);
+  uint32_t size = CameraMetadata::get_camera_metadata_compact_size(meta_buffer);
   if (size <= 0) {
     const_cast<CameraMetadata &>(result).unlock(meta_buffer);
     return;
@@ -2394,7 +2470,7 @@ void RecorderServiceCallbackProxy::NotifyCameraResult(
 
   std::string data;
   data.resize(size);
-  auto copy_ptr = copy_camera_metadata(&data.at(0), data.size(), meta_buffer);
+  auto copy_ptr = CameraMetadata::copy_camera_metadata(&data.at(0), data.size(), meta_buffer);
   if (copy_ptr) {
     ncr->set_result_meta(data);
     const_cast<CameraMetadata &>(result).unlock(meta_buffer);
@@ -2403,6 +2479,13 @@ void RecorderServiceCallbackProxy::NotifyCameraResult(
     const_cast<CameraMetadata &>(result).unlock(meta_buffer);
   }
 
+  QMMF_VERBOSE("%s: Exit", __func__);
+}
+
+void RecorderServiceCallbackProxy::NotifyCancelCaptureImage() {
+  QMMF_VERBOSE("%s: Enter", __func__);
+  std::lock_guard<std::mutex> l(snapshot_buffers_lock_);
+  snapshot_buffers_.clear();
   QMMF_VERBOSE("%s: Exit", __func__);
 }
 

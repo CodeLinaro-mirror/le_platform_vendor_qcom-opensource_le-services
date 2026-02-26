@@ -33,7 +33,7 @@
 
 #pragma once
 
-#include "recorder/src/client/qmmf_recorder_service_intf.h"
+#include "qmmf_recorder_service_intf.h"
 
 namespace qmmf {
 
@@ -76,6 +76,8 @@ class RemoteCallBack {
                                void *event_data, size_t event_data_size);
 
     void NotifyCameraResult(uint32_t camera_id, const CameraMetadata &result);
+
+    void NotifyCancelCaptureImage();
 
     void NotifyDeleteVideoTrack(uint32_t track_id);
 

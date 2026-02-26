@@ -35,7 +35,7 @@
 #define LOG_TAG "RecorderImpl"
 
 #ifndef HAVE_BINDER
-#include "common/propertyvault/qmmf_propertyvault.h"
+#include "common/config/qmmf_config.h"
 #endif
 #include "recorder/src/service/qmmf_recorder_impl.h"
 
@@ -376,9 +376,12 @@ status_t RecorderImpl::StartCamera(const uint32_t client_id,
   ErrorCb errcb = [&] (uint32_t camera_id, uint32_t errcode) {
       CameraErrorCb(camera_id, errcode); };
 
+  SystemCb syscb = [&] (uint32_t camera_id, uint32_t errcode) {
+      CameraSystemCb(camera_id, errcode); };
+
   auto ret = camera_source_->StartCamera(camera_id, framerate, extra_param,
                                          enable_result_cb ? cb : nullptr,
-                                         errcb);
+                                         errcb, syscb);
   if (ret != 0) {
     QMMF_ERROR("%s: StartCamera Failed!!", __func__);
     return -EINVAL;
@@ -980,6 +983,11 @@ status_t RecorderImpl::CancelCaptureImage(const uint32_t client_id,
     QMMF_ERROR("%s: CancelCaptureImage failed!", __func__);
     return ret;
   }
+
+  // This method doesn't go up to client as a callback, it is just to update
+  // Internal data structure used for buffer mapping.
+  remote_cb_handle_(client_id)->NotifyCancelCaptureImage();
+
   QMMF_DEBUG("%s: Exit client_id(%u):camera_id(%d):image_id(%d)", __func__,
       client_id, camera_id, image_id);
   return 0;
@@ -1231,6 +1239,32 @@ status_t RecorderImpl::GetCameraCharacteristics(const uint32_t client_id,
   return 0;
 }
 
+status_t RecorderImpl::GetOfflineParams(const uint32_t client_id,
+                                        const OfflineCameraInputParams &in_params,
+                                        OfflineCameraOutputParams &out_params) {
+  QMMF_DEBUG("%s Enter client_id(%u)", __func__, client_id);
+
+#ifdef ENABLE_OFFLINE_JPEG
+  assert(offline_process_ != nullptr);
+  if (!offline_process_->IsClientFound(client_id)) {
+    QMMF_ERROR("%s: Client (%u) is not found", __func__, client_id);
+    return -EINVAL;
+  }
+  auto ret = offline_process_->GetParams(client_id, in_params, out_params);
+  if (ret != 0) {
+    QMMF_ERROR("%s: get offline params failed!", __func__);
+    return ret;
+  }
+#else
+  QMMF_ERROR("Offline Process not supported on this platform");
+  return -ENOSYS;
+#endif
+
+  QMMF_DEBUG("%s Exit client_id(%u)", __func__, client_id);
+  return 0;
+}
+
+
 status_t RecorderImpl::CreateOfflineProcess(const uint32_t client_id,
                                       const OfflineCameraCreateParams& params) {
 
@@ -1379,6 +1413,40 @@ void RecorderImpl::CameraErrorCb(uint32_t camera_id, uint32_t errcode) {
       break;
     case REMAP_ALL_BUFFERS:
       event = static_cast<EventType>(REMAP_ALL_BUFFERS);
+      break;
+    default:
+      event = EventType::kUnknown;
+      break;
+  }
+
+  for (auto const& client_id : client_ids) {
+    assert(IsClientValid(client_id));
+    remote_cb_handle_(client_id)->NotifyRecorderEvent(
+        event, &camera_id, sizeof(uint32_t));
+  }
+}
+
+void RecorderImpl::CameraSystemCb(uint32_t camera_id, uint32_t errcode) {
+  assert(remote_cb_handle_ != nullptr);
+  EventType event = EventType::kUnknown;
+
+  auto client_ids = GetCameraClients(camera_id);
+
+  switch (errcode) {
+    case MSG_SYSTEM_SOFFREEZE:
+      event = EventType::kSOFFreeze;
+      break;
+    case MSG_SYSTEM_RECOVERYFAILURE:
+      event = EventType::kRecoveryFailure;
+      break;
+    case MSG_SYSTEM_FATAL:
+      event = EventType::kFatal;
+      break;
+    case MSG_SYSTEM_RECOVERYSUCCESS:
+      event = EventType::kRecoverySuccess;
+      break;
+    case MSG_SYSTEM_INTERNAL_RECOVERY:
+      event = EventType::kInternal_Recovery;
       break;
     default:
       event = EventType::kUnknown;

@@ -25,6 +25,8 @@
  * SPDX-License-Identifier: BSD-3-Clause-Clear
  */
 
+#define LOG_TAG "Camera3Monitor"
+
 #include "recorder/src/service/qmmf_recorder_common.h"
 #include "qmmf_camera3_device_client.h"
 #include "qmmf_camera3_utils.h"
@@ -64,7 +66,7 @@ int32_t Camera3Monitor::AcquireMonitor() {
   pthread_mutex_unlock(&lock_);
   if (monitor_states_.count(id) == 0) {
     res = -ENODATA;
-    QMMF_ERROR("%s: Cannot add new monitor %d: %s (%zd)\n", __func__, id,
+    QMMF_ERROR("%s: Cannot add new monitor %d: %s (%d)\n", __func__, id,
                strerror(-res), res);
     return res;
   }
@@ -171,7 +173,7 @@ bool Camera3Monitor::ThreadLoop() {
 
   for (uint32_t i = 0; i < input_queue_.size(); i++) {
     const StateTransition &newState = input_queue_[i];
-    if (monitor_states_.count(newState.id) > 0) { 
+    if (monitor_states_.count(newState.id) > 0) {
       monitor_states_[newState.id] = newState.state;
       MonitorState newMonitorState = BuildCompositeState();
       if (newMonitorState != oldState) {

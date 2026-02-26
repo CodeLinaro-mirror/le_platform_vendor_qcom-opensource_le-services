@@ -56,6 +56,7 @@
 #include <sys/un.h>
 #include <thread>
 #include <unistd.h>
+#include <unordered_set>
 #endif // HAVE_BINDER
 
 #if TARGET_ION_ABI_VERSION >= 2
@@ -63,7 +64,7 @@
 #endif
 
 #ifndef HAVE_BINDER
-#include "common/propertyvault/qmmf_propertyvault.h"
+#include "common/config/qmmf_config.h"
 #endif
 #include "qmmf-sdk/qmmf_vendor_tag_descriptor.h"
 #include "recorder/src/client/qmmf_recorder_client.h"
@@ -96,36 +97,12 @@ using ::std::underlying_type;
 #else
 class RecorderServiceProxy: public IRecorderService {
  public:
-  void* libcamera_metadata_handle_;
-  copy_camera_metadata_fnp* copy_camera_metadata_;
-  get_camera_metadata_compact_size_fnp* get_camera_metadata_compact_size_;
 
   RecorderServiceProxy() {
-    libcamera_metadata_handle_ = dlopen("libcamera_metadata.so.0", RTLD_LAZY);
-    char* err = dlerror();
-
-    if ((NULL != libcamera_metadata_handle_) && (NULL == err)) {
-      copy_camera_metadata_ =
-            reinterpret_cast<copy_camera_metadata_fnp*>(
-            dlsym(libcamera_metadata_handle_, "copy_camera_metadata"));
-      get_camera_metadata_compact_size_ =
-            reinterpret_cast<get_camera_metadata_compact_size_fnp*>(
-            dlsym(libcamera_metadata_handle_, "get_camera_metadata_compact_size"));
-      char* dlsym_err = dlerror();
-      if (dlsym_err != NULL) {
-        assert(copy_camera_metadata_);
-        assert(get_camera_metadata_compact_size_);
-      }
-    }
-
-    assert(libcamera_metadata_handle_ != NULL);
   }
 
   ~RecorderServiceProxy() {
     QMMF_DEBUG("%s: Enter", __func__);
-    if (libcamera_metadata_handle_ != NULL) {
-      dlclose(libcamera_metadata_handle_);
-    }
 
     if (socket_ != -1) {
       close(socket_);
@@ -144,7 +121,7 @@ class RecorderServiceProxy: public IRecorderService {
     }
 
     // Set up server address
-    std::string path{"/tmp/socket/cam_server/le_cam_socket"};
+    std::string path{"/run/cam_server/le_cam_socket"};
     sockaddr_un addr;
     addr.sun_family = AF_UNIX;
     auto size = path.size();
@@ -158,12 +135,53 @@ class RecorderServiceProxy: public IRecorderService {
 
     RecorderClientReqMsg cmd;
     status_t ret;
-    cmd.set_command(RECORDER_SERVICE_CMDS::RECORDER_CONNECT);
+    cmd.set_command(RECORDER_SERVICE_CMDS::RECORDER_GET_SUPPORTED_INTERFACE_VER);
     ret = SendRequest(cmd);
     if (ret != 0)
       return ret;
 
     RecorderClientRespMsg resp;
+    ret = RecvResponse(resp);
+    if (ret != 0)
+      return ret;
+
+    ret = resp.status();
+    if (ret != 0)
+      return ret;
+
+    // Add here MD5 sums of more supported qmmf.proto contents
+    const std::unordered_set<std::string_view> kSupportedInterfaceVersions = {
+      QMMF_CURRENT_INTERFACE_VER
+    };
+
+    bool found = false;
+    for (auto i = 0; i < resp.get_supported_interface_ver_resp().vers_size(); ++i) {
+      const std::string& ver = resp.get_supported_interface_ver_resp().vers(i);
+      if (kSupportedInterfaceVersions.find(ver) != kSupportedInterfaceVersions.end()) {
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      QMMF_ERROR ("%s: Not compatible server interface", __func__);
+      QMMF_INFO ("%s: Supported server interface versions:", __func__);
+      for (auto i = 0; i < resp.get_supported_interface_ver_resp().vers_size(); ++i) {
+        const std::string& ver = resp.get_supported_interface_ver_resp().vers(i);
+        QMMF_INFO ("%s: \t %s", __func__, ver.c_str());
+      }
+      QMMF_INFO ("%s: Supported client interface versions:", __func__);
+      for (const auto& ver : kSupportedInterfaceVersions) {
+        QMMF_INFO ("%s: \t %.*s", __func__, static_cast<int>(ver.size()), ver.data());
+      }
+      return -1;
+    }
+
+    cmd.set_command(RECORDER_SERVICE_CMDS::RECORDER_CONNECT);
+    ret = SendRequest(cmd);
+    if (ret != 0)
+      return ret;
+
     ret = RecvResponse(resp);
     if (ret != 0)
       return ret;
@@ -456,10 +474,10 @@ class RecorderServiceProxy: public IRecorderService {
     uint32_t size = meta.size();
     for (uint32_t i = 0; i < size; i++) {
       const camera_metadata_t *meta_buffer = meta[i].getAndLock();
-      uint32_t size = get_camera_metadata_compact_size_(meta_buffer);
+      uint32_t size = CameraMetadata::get_camera_metadata_compact_size(meta_buffer);
       std::string *data = cmd.mutable_capture_image()->add_meta();
       data->resize(size);
-      copy_camera_metadata_(&data->at(0), data->size(), meta_buffer);
+      CameraMetadata::copy_camera_metadata(&data->at(0), data->size(), meta_buffer);
       const_cast<CameraMetadata&>(meta[i]).unlock(meta_buffer);
     }
 
@@ -575,10 +593,10 @@ class RecorderServiceProxy: public IRecorderService {
     cmd.mutable_set_camera_param()->set_camera_id(camera_id);
 
     const camera_metadata_t *meta_buffer = meta.getAndLock();
-    uint32_t size = get_camera_metadata_compact_size_(meta_buffer);
+    uint32_t size = CameraMetadata::get_camera_metadata_compact_size(meta_buffer);
     std::string *data = new std::string;
     data->resize(size);
-    auto copy_ptr = copy_camera_metadata_(&data->at(0), data->size(), meta_buffer);
+    auto copy_ptr = CameraMetadata::copy_camera_metadata(&data->at(0), data->size(), meta_buffer);
     if (!copy_ptr) {
       QMMF_ERROR ("%s: Failed to copy metadata", __func__);
       return -1;
@@ -622,7 +640,7 @@ class RecorderServiceProxy: public IRecorderService {
     const std::string& data = resp.get_camera_param_resp().meta();
     uint8_t *raw_buf = new uint8_t[data.size()];
     camera_metadata_t *meta_buffer =
-        copy_camera_metadata_(raw_buf, data.size(),
+        CameraMetadata::copy_camera_metadata(raw_buf, data.size(),
             reinterpret_cast<const camera_metadata_t *>(data.data()));
     if (!meta_buffer) {
       QMMF_ERROR ("%s: Failed to copy metadata", __func__);
@@ -644,11 +662,11 @@ class RecorderServiceProxy: public IRecorderService {
     cmd.mutable_set_camera_session_param()->set_camera_id(camera_id);
 
     const camera_metadata_t *meta_buffer = meta.getAndLock();
-    uint32_t size = get_camera_metadata_compact_size_(meta_buffer);
+    uint32_t size = CameraMetadata::get_camera_metadata_compact_size(meta_buffer);
 
     std::string *data = new std::string;
     data->resize(size);
-    auto copy_ptr = copy_camera_metadata_(&data->at(0), data->size(), meta_buffer);
+    auto copy_ptr = CameraMetadata::copy_camera_metadata(&data->at(0), data->size(), meta_buffer);
     if (!copy_ptr) {
       QMMF_ERROR ("%s: Failed to copy metadata", __func__);
       return -1;
@@ -714,7 +732,7 @@ class RecorderServiceProxy: public IRecorderService {
     const std::string& data = resp.get_default_capture_param_resp().meta();
     uint8_t *raw_buf = new uint8_t[data.size()];
     camera_metadata_t *meta_buffer =
-        copy_camera_metadata_(raw_buf, data.size(),
+        CameraMetadata::copy_camera_metadata(raw_buf, data.size(),
             reinterpret_cast<const camera_metadata_t *>(data.data()));
     if (!meta_buffer) {
       QMMF_ERROR ("%s: Failed to copy metadata", __func__);
@@ -749,7 +767,7 @@ class RecorderServiceProxy: public IRecorderService {
       CameraMetadata caps;
       uint8_t *raw_buf = new uint8_t[meta_proto.size()];
       camera_metadata_t *meta_buffer =
-          copy_camera_metadata_ (raw_buf, meta_proto.size(),
+          CameraMetadata::copy_camera_metadata (raw_buf, meta_proto.size(),
               reinterpret_cast<const camera_metadata_t *>(meta_proto.data()));
       if (!meta_buffer) {
         QMMF_ERROR ("%s: Failed to copy metadata", __func__);
@@ -783,7 +801,7 @@ class RecorderServiceProxy: public IRecorderService {
     const std::string& data = resp.get_camera_characteristics_resp().meta();
     uint8_t *raw_buf = new uint8_t[data.size()];
     camera_metadata_t *meta_buffer =
-        copy_camera_metadata_(raw_buf, data.size(),
+        CameraMetadata::copy_camera_metadata(raw_buf, data.size(),
             reinterpret_cast<const camera_metadata_t *>(data.data()));
     if (!meta_buffer) {
       QMMF_ERROR ("%s: Failed to copy metadata", __func__);
@@ -814,6 +832,13 @@ class RecorderServiceProxy: public IRecorderService {
     desc->readFromBuffer(reinterpret_cast<const uint8_t *>(data.data()));
 
     return resp.status();
+  }
+
+  status_t GetOfflineParams(const uint32_t client_id,
+                            const OfflineCameraInputParams &in_params,
+                            OfflineCameraOutputParams &out_params) {
+    // To be implemented
+    return -EPERM;
   }
 
   status_t CreateOfflineProcess(const uint32_t client_id,
@@ -848,7 +873,7 @@ class RecorderServiceProxy: public IRecorderService {
     }
 
     *(static_cast<uint32_t *>(buffer)) = msg_size;
-    cmd.SerializeToArray(buffer+offset, msg_size);
+    cmd.SerializeToArray(static_cast<uint8_t *>(buffer) + offset, msg_size);
 
     ssize_t bytes_sent = send(socket_, buffer, buf_size, 0);
     free (buffer);
@@ -928,6 +953,13 @@ RecorderClient::RecorderClient()
 
 #ifdef USE_LIBGBM
   gbm_fd_ = open("/dev/dma_heap/qcom,system", O_RDONLY | O_CLOEXEC);
+
+  if (gbm_fd_ < 0) {
+    QMMF_WARN ("%s: Failed to open /dev/dma_heap/qcom,system, "
+      "Falling back to /dev/dma_heap/system", __func__);
+    gbm_fd_ = open ("/dev/dma_heap/system", O_RDONLY | O_CLOEXEC);
+  }
+
   if (gbm_fd_ < 0) {
     QMMF_WARN("%s: Falling back to /dev/ion \n", __func__);
     gbm_fd_ = open("/dev/ion", O_RDONLY | O_CLOEXEC);
@@ -1010,6 +1042,13 @@ status_t RecorderClient::Connect(const RecorderCb& cb) {
   }
 
   ion_device_ = open("/dev/dma_heap/qcom,system", O_RDONLY | O_CLOEXEC);
+
+  if (ion_device_ < 0) {
+    QMMF_WARN ("%s: Failed to open /dev/dma_heap/qcom,system, "
+      "Falling back to /dev/dma_heap/system", __func__);
+    ion_device_ = open ("/dev/dma_heap/system", O_RDONLY | O_CLOEXEC);
+  }
+
   if (ion_device_ < 0) {
     QMMF_WARN("%s: Falling back to /dev/ion \n", __func__);
     ion_device_ = open("/dev/ion", O_RDONLY | O_CLOEXEC);
@@ -1514,22 +1553,6 @@ status_t RecorderClient::ReturnImageCaptureBuffer(const uint32_t camera_id,
     return -ENODEV;
   }
 
-  {
-    // Unmap buffer from client process.
-    std::lock_guard<std::mutex> lock(snapshot_buffers_lock_);
-    if (snapshot_buffers_.count(buffer.fd) == 0) {
-      QMMF_ERROR("%s Invalid buffer fd(%d)!", __func__, buffer.fd);
-      return -EINVAL;
-    }
-    auto buffer_info = snapshot_buffers_[buffer.fd];
-
-    QMMF_INFO("%s Snapshot BufInfo: ion_fd(%d), vaddr(%p), size(%lu)", __func__,
-              buffer_info.ion_fd, buffer_info.vaddr, buffer_info.size);
-
-    UnmapBuffer(buffer_info);
-    snapshot_buffers_.erase(buffer.fd);
-  }
-
   QMMF_DEBUG("%s Returning buf_id(%d) back to service!", __func__,
       buffer.buf_id);
   assert(client_id_ > 0);
@@ -1698,6 +1721,25 @@ status_t RecorderClient::GetVendorTagDescriptor(std::shared_ptr<VendorTagDescrip
     QMMF_ERROR("%s GetVendorTagDescriptor failed!", __func__);
   }
   QMMF_DEBUG("%s Exit ", __func__);
+  return ret;
+}
+
+status_t RecorderClient::GetOfflineParams(const OfflineCameraInputParams &in_params,
+                                          OfflineCameraOutputParams &out_params) {
+  QMMF_DEBUG("%s Enter ", __func__);
+  std::lock_guard<std::mutex> lock(lock_);
+  if (!CheckServiceStatus()) {
+    return -ENODEV;
+  }
+  assert(client_id_ > 0);
+
+  auto ret = recorder_service_->GetOfflineParams(client_id_,
+      in_params, out_params);
+  if (0 != ret) {
+    QMMF_ERROR("%s GetOfflineParams failed!", __func__);
+  }
+
+  QMMF_DEBUG("%s Exit", __func__);
   return ret;
 }
 
@@ -1968,7 +2010,7 @@ status_t RecorderClient::MapBuffer(BufferInfo& info, const BufferMeta& meta) {
   sync.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_RW;
 
   if (ioctl(info.ion_fd, DMA_BUF_IOCTL_SYNC, &sync) != 0) {
-    ALOGE("%s: DMA SYNC START failed!", __func__);
+    QMMF_ERROR("%s: DMA SYNC START failed!", __func__);
   }
 #endif
   info.vaddr = vaddr;
@@ -1996,7 +2038,7 @@ void RecorderClient::UnmapBuffer(BufferInfo& info) {
   sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_RW;
 
   if (ioctl(info.ion_fd, DMA_BUF_IOCTL_SYNC, &sync) != 0) {
-    ALOGE("%s: DMA SYNC END failed!", __func__);
+    QMMF_ERROR("%s: DMA SYNC END failed!", __func__);
   }
 #endif
 
@@ -2009,7 +2051,17 @@ void RecorderClient::UnmapBuffer(BufferInfo& info) {
 
 #ifdef USE_LIBGBM
   ReleaseBuffer(info.ion_fd, info.ion_meta_fd);
-#endif // USE_LIBGBM
+#else
+  if (info.ion_fd >= 0) {
+    close(info.ion_fd);
+    info.ion_fd = -1;
+  }
+
+  if (info.ion_meta_fd >= 0) {
+    close(info.ion_meta_fd);
+    info.ion_meta_fd = -1;
+  }
+#endif
 
   QMMF_DEBUG("%s Exit ", __func__);
   return;
@@ -2157,22 +2209,43 @@ void RecorderClient::NotifySnapshotData(uint32_t camera_id, uint32_t imgcount,
   QMMF_DEBUG("%s Enter ", __func__);
 
   assert(image_capture_cb_ != nullptr);
-  assert(bn_buffer.ion_fd > 0);
-  assert(bn_buffer.buffer_id > 0);
 
+  bool is_mapped = false;
   BufferInfo buffer_info {};
-  buffer_info.ion_fd      = bn_buffer.ion_fd;
-  buffer_info.ion_meta_fd = bn_buffer.ion_meta_fd;
-  buffer_info.size        = bn_buffer.capacity;
 
-  auto ret = MapBuffer(buffer_info, meta);
-      if (0 != ret) {
-    QMMF_ERROR("%s Failed to map buffer!", __func__);
-    return;
-  }
+  // Check if ION buffer is already imported and mapped, if it is then get
+  // buffer info from map.
   {
-    std::lock_guard<std::mutex> lock(snapshot_buffers_lock_);
-    snapshot_buffers_.emplace(bn_buffer.ion_fd, buffer_info);
+    std::lock_guard<std::mutex> l(snapshot_buffers_lock_);
+    if (snapshot_buffers_.count(bn_buffer.buffer_id) != 0) {
+      buffer_info = snapshot_buffers_[bn_buffer.buffer_id];
+      bn_buffer.ion_fd = buffer_info.ion_fd;
+      bn_buffer.ion_meta_fd = buffer_info.ion_meta_fd;
+      is_mapped = true;
+
+      QMMF_VERBOSE("%s Buffer is already mapped! buffer_id(%d):ion_fd(%d):"
+          "vaddr(%p)",  __func__, bn_buffer.buffer_id,
+          buffer_info.ion_fd, buffer_info.vaddr);
+    }
+  }
+
+  if (!is_mapped) {
+    buffer_info.ion_fd      = bn_buffer.ion_fd;
+    buffer_info.ion_meta_fd = bn_buffer.ion_meta_fd;
+    buffer_info.size        = bn_buffer.capacity;
+
+    auto ret = MapBuffer(buffer_info, meta);
+    if (0 != ret) {
+      QMMF_ERROR("%s Failed to map buffer!", __func__);
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(snapshot_buffers_lock_);
+      snapshot_buffers_.emplace(bn_buffer.buffer_id, buffer_info);
+      QMMF_VERBOSE("%s BufInfo: ion_fd(%d), "
+          "vaddr(%p), size(%lu)", __func__, buffer_info.ion_fd,
+          buffer_info.vaddr, buffer_info.size);
+    }
   }
 
   BufferDescriptor buffer {};
@@ -2261,11 +2334,11 @@ void RecorderClient::NotifyVideoTrackData(uint32_t track_id,
       BufferInfoMap& buffer_info_map = track_buffers_map_[track_id];
       buffer_info_map.emplace(bn_buffer.buffer_id, buffer_info);
 
-      QMMF_VERBOSE("%s track_buffers_map_.size = %d", __func__,
+      QMMF_VERBOSE("%s track_buffers_map_.size = %ld", __func__,
           track_buffers_map_.size());
 
       for (auto const& iter : track_buffers_map_) {
-        QMMF_VERBOSE("%s track_id(%d): BufInfoMap size = %d", __func__,
+        QMMF_VERBOSE("%s track_id(%u): BufInfoMap size = %ld", __func__,
             iter.first, iter.second.size());
 
         for (auto const& it : iter.second) {
@@ -2733,6 +2806,36 @@ class BpRecorderService: public BpInterface<IRecorderService> {
     return ret;
   }
 
+  status_t GetOfflineParams(const uint32_t client_id,
+                            const OfflineCameraInputParams &in_params,
+                            OfflineCameraOutputParams &out_params) {
+    Parcel data, reply;
+
+    data.writeInterfaceToken(IRecorderService::getInterfaceDescriptor());
+    data.writeUint32(client_id);
+
+    uint32_t in_params_size = sizeof (in_params);
+    data.writeUint32(in_params_size);
+    android::Parcel::WritableBlob blob;
+    data.writeBlob(in_params_size, false, &blob);
+    memcpy(blob.data(), &in_params, in_params_size);
+
+    remote()->transact(uint32_t(QMMF_RECORDER_SERVICE_CMDS::
+        RECORDER_GET_OFFLINE_PARAMS), data, &reply);
+
+    auto ret = reply.readInt32();
+    if (NO_ERROR == ret) {
+      uint32_t out_params_size;
+      reply.readUint32(&out_params_size);
+      assert(out_params_size == sizeof(out_params));
+
+      android::Parcel::ReadableBlob out_params_blob;
+      reply.readBlob(out_params_size, &out_params_blob);
+      memcpy(&out_params, out_params_blob.data(), out_params_size);
+    }
+    return ret;
+  }
+
   status_t CreateOfflineProcess(const uint32_t client_id,
                              const OfflineCameraCreateParams &params) {
     Parcel data, reply;
@@ -2927,12 +3030,31 @@ class BpRecorderServiceCallback: public BpInterface<IRecorderServiceCallback> {
                           BnBuffer& buffer, BufferMeta& meta) {
 
     Parcel data, reply;
+    bool ismapped = false;
     data.writeInterfaceToken(IRecorderServiceCallback::
         getInterfaceDescriptor());
     data.writeUint32(camera_id);
     data.writeUint32(imgcount);
-    data.writeFileDescriptor(buffer.ion_fd);
-    data.writeFileDescriptor(buffer.ion_meta_fd);
+
+    {
+      std::lock_guard<std::mutex> l(snapshot_buffers_lock_);
+      ismapped = (snapshot_buffers_.count(buffer.buffer_id) != 0);
+
+      QMMF_VERBOSE("Bp%s: buffer.ion_fd=%d ismapped:%d",
+          __func__, buffer.ion_fd, ismapped);
+    }
+    data.writeInt32(ismapped);
+
+    if (!ismapped) {
+      data.writeFileDescriptor(buffer.ion_fd);
+      data.writeFileDescriptor(buffer.ion_meta_fd);
+      {
+        std::lock_guard<std::mutex> l(snapshot_buffers_lock_);
+        snapshot_buffers_.emplace(buffer.buffer_id);
+      }
+      QMMF_VERBOSE("%s: Bp: buffer.ion_fd=%d mapping:%d", __func__,
+          buffer.ion_fd, true);
+    }
     uint32_t size = sizeof buffer;
     data.writeUint32(size);
     android::Parcel::WritableBlob blob;
@@ -3068,6 +3190,11 @@ class BpRecorderServiceCallback: public BpInterface<IRecorderServiceCallback> {
   std::map<uint32_t,  std::set<uint32_t> > track_buffers_map_;
   // to protect track_buffers_map_
   std::mutex  track_buffers_lock_;
+
+  // set <buffer_id>
+  std::set<uint32_t> snapshot_buffers_;
+  // to protect snapshot_buffers_
+  std::mutex  snapshot_buffers_lock_;
 };
 
 IMPLEMENT_META_INTERFACE(RecorderServiceCallback,
@@ -3103,10 +3230,16 @@ status_t BnRecorderServiceCallback::onTransact(uint32_t code,
     break;
     case RECORDER_SERVICE_CB_CMDS::RECORDER_NOTIFY_SNAPSHOT_DATA: {
       uint32_t camera_id, count, size;
+      int32_t ismapped = 0;
+      int32_t ion_fd = -1, ion_meta_fd = -1;
       data.readUint32(&camera_id);
       data.readUint32(&count);
-      uint32_t ion_fd = dup(data.readFileDescriptor());
-      uint32_t ion_meta_fd = dup(data.readFileDescriptor());
+
+      data.readInt32(&ismapped);
+      if (ismapped == 0) {
+        ion_fd = dup(data.readFileDescriptor());
+        ion_meta_fd = dup(data.readFileDescriptor());
+      }
       data.readUint32(&size);
       android::Parcel::ReadableBlob blob;
       data.readBlob(size, &blob);
@@ -3253,7 +3386,7 @@ status_t RecorderServiceCallbackStub::Init(uint32_t client_id) {
   QMMF_INFO("%s: Enter", __func__);
 
   std:;stringstream path;
-  path << "/tmp/socket/cam_server/le_cam_client." << client_id << ".sock";
+  path << "/run/cam_server/le_cam_client." << client_id << ".sock";
   socket_path_ = path.str();
   ::unlink(socket_path_.c_str());
 
@@ -3328,7 +3461,7 @@ void RecorderServiceCallbackStub::ThreadLoop() {
     memset(socket_recv_buf_, 0, kMaxSocketBufSize);
 
     ssize_t bytes_read = recvmsg(client_socket_, &msg, 0);
-    QMMF_VERBOSE("%s: recv %d bytes", __func__, bytes_read);
+    QMMF_VERBOSE("%s: recv %ld bytes", __func__, bytes_read);
 
     if (bytes_read < 0) {
       QMMF_ERROR("%s: recv failure %s", __func__, strerror(errno));
