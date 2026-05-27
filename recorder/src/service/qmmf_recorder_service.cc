@@ -1599,6 +1599,8 @@ status_t RecorderService::Connect(const std::shared_ptr<IRecorderServiceCallback
     return ret;
   }
 
+  active_client_ids_.insert(*client_id);
+
   recorder_->RegisterClient(*client_id);
 
   NotifyClientDeath notify_death = [this, capture_client_id = *client_id] {
@@ -1609,6 +1611,7 @@ status_t RecorderService::Connect(const std::shared_ptr<IRecorderServiceCallback
       std::make_shared<DeathNotifier>(notify_death);
   if (!death_notifier.get()) {
     QMMF_ERROR("%s: Unable to allocate death notifier!", __func__);
+    active_client_ids_.erase(*client_id);
     return -ENODEV;
   }
 
@@ -1656,6 +1659,7 @@ status_t RecorderService::Disconnect(uint32_t client_id) {
 
   death_notifier_list_.erase(client_id);
   remote_cb_list_.erase(client_id);
+  active_client_ids_.erase(client_id);
 
   if (death_notifier_list_.empty() && remote_cb_list_.empty()) {
     if (recorder_) {
@@ -2244,6 +2248,7 @@ status_t RecorderService::DisconnectInternal(const uint32_t client_id) {
 #endif
   death_notifier_list_.erase(client_id);
   remote_cb_list_.erase(client_id);
+  active_client_ids_.erase(client_id);
 
   if (death_notifier_list_.empty() && remote_cb_list_.empty()) {
     if (recorder_) {
@@ -2266,7 +2271,11 @@ status_t RecorderService::GetVendorTagDescriptor(std::shared_ptr<VendorTagDescri
 status_t RecorderService::GetUniqueClientID(uint32_t *client_id) {
 
   for (uint32_t id = 1; id <= 0xFF; id++) {
+#ifdef HAVE_BINDER
     if (remote_cb_list_.count(id) == 0) {
+#else
+    if (active_client_ids_.count(id) == 0) {
+#endif
       *client_id = id;
       return 0;
     }
