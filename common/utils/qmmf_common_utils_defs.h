@@ -35,6 +35,7 @@
 
 #include <sstream>
 #include <iomanip>
+#include <vector>
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -50,7 +51,7 @@ namespace qmmf {
 const int64_t kWaitDelay = 2000000000;  // 2 sec
 const uint32_t kMaxSocketBufSize = 300000;
 
-inline const char* kCameraMetaDataLibName = "libcamera_metadata";
+inline const char* kCameraMetaDataLibName = "libcamx_metadata";
 
 #define FORCE_SENSOR_MODE_MASK (0x00F00000)
 #define FORCE_SENSOR_MODE_DATA(idx) ((idx + 1) << 20)
@@ -58,6 +59,9 @@ inline const char* kCameraMetaDataLibName = "libcamera_metadata";
 #define SOC_DEV_PATH_PRIMARY "/sys/devices/soc0/soc_id"
 #define SOC_DEV_PATH_SECONDARY "/sys/devices/system/soc/soc0/id"
 #define CHIPSET_BUFFER_SIZE 32
+
+#define LIB_SEARCH_PATH_DEFAULT   "/usr/lib"
+#define LIB_SEARCH_PATH_MULTIARCH "/usr/lib/aarch64-linux-gnu"
 
 enum class SocId {
   kInvalid = 0,
@@ -90,13 +94,21 @@ enum class SocId {
   kMONACO_SRV1L = 607,
   kLEMANS_IVI_ADAS_L = 619,
   kMONACO_SRV1L_FC = 620,
-  KLEMANS_QRB = 656,
+  kPURWA_SCP = 635,
+  kLEMANS_QRB = 656,
+  kGLYMUR_SIP = 662,
   kQCS9100_IOT = 667,
   kQCS8300 = 674,
   kQCS8275 = 675,
   kQCS9075 = 676,
   kTALOS_QCS615 = 680,
   kMONACO_FLEX = 695,
+  kGLYMUR_COB = 698,
+  kGLYMUR_MAHUA = 699,
+  kHAMOA = 709,
+  kHAMOA_10CORE = 710,
+  kPURWA = 711,
+  kGLYMUR_KALAMBO = 719
 };
 
 struct StreamBuffer {
@@ -357,8 +369,18 @@ class Target {
   // @brief  Return true/false if file exist
   // @return bool
   static bool FileExists(const std::string &name, const std::string &version) {
-    std::string full_path = "/usr/lib/" + name + ".so." + version;
-    return access(full_path.c_str(), F_OK) == 0;
+    static const std::vector<std::string> search_paths = {
+        LIB_SEARCH_PATH_DEFAULT,
+        LIB_SEARCH_PATH_MULTIARCH,
+    };
+
+    for (const auto &path : search_paths) {
+      std::string full_path = path + "/" + name + ".so." + version;
+      if (access(full_path.c_str(), F_OK) == 0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // GetLibName
@@ -413,7 +435,7 @@ class Target {
       case SocId::kLEMANS_IVI_ADAS:
       case SocId::kLEMANS_ADAS:
       case SocId::kLEMANS_IVI_ADAS_L:
-      case SocId::KLEMANS_QRB:
+      case SocId::kLEMANS_QRB:
       case SocId::kQCS8300:
       case SocId::kQCS8275:
       case SocId::kMONACO_IVI:
@@ -433,6 +455,17 @@ class Target {
       case SocId::kTALOS_QCS615:
         return "talos";
 
+      case SocId::kHAMOA_10CORE:
+      case SocId::kHAMOA:
+      case SocId::kPURWA:
+      case SocId::kPURWA_SCP:
+        return "hamoa";
+
+      case SocId::kGLYMUR_SIP:
+      case SocId::kGLYMUR_COB:
+      case SocId::kGLYMUR_MAHUA:
+      case SocId::kGLYMUR_KALAMBO:
+        return "glymur";
       default:
         return {};
     }

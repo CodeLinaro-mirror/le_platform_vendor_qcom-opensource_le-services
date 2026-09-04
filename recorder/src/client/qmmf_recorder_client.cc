@@ -757,6 +757,13 @@ class RecorderServiceProxy: public IRecorderService {
     return ret;
   }
 
+  status_t SetSHDR(const uint32_t client_id,
+                   const uint32_t camera_id,
+                   const bool enable) {
+    // Dead code — SHDR not supported on this target (non-binder/QLI build)
+    return 0;
+  }
+
   status_t GetDefaultCaptureParam(const uint32_t client_id,
                                   const uint32_t camera_id,
                                   CameraMetadata &meta) {
@@ -824,6 +831,39 @@ class RecorderServiceProxy: public IRecorderService {
       meta.push_back(caps);
     }
     return resp.status();
+  }
+
+  status_t GetFeatureCapabilities(const uint32_t client_id,
+                                  FeatureCapabilityMap& capabilities) {
+    // BUILD REQUEST
+    RecorderClientReqMsg cmd;
+    cmd.set_command(RECORDER_SERVICE_CMDS::RECORDER_GET_FEATURE_CAPABILITIES);
+    cmd.mutable_get_feature_caps()->set_client_id(client_id);
+
+    status_t ret = SendRequest(cmd);
+    if (ret < 0) return ret;
+
+    // RECEIVE RESPONSE
+    RecorderClientRespMsg resp;
+    ret = RecvResponse(resp);
+    if (ret < 0) return ret;
+
+    // DESERIALIZE proto → FeatureCapabilityMap
+    for (const auto& entry : resp.get_feature_caps_resp().entries()) {
+      CameraFeatureKey key = static_cast<CameraFeatureKey>(entry.key());
+      CameraFeatureCapability cap;
+      cap.type = static_cast<FeatureValueType>(entry.type());
+      switch (cap.type) {
+        case TYPE_BOOL:  cap.bool_value  = entry.bool_value();  break;
+        case TYPE_INT32: cap.int_value   = entry.int_value();   break;
+        case TYPE_FLOAT: cap.float_value = entry.float_value(); break;
+        default: break;
+      }
+      capabilities[key] = cap;
+    }
+    QMMF_DEBUG("%s: Deserialized %zu feature capability entries",
+               __func__, capabilities.size());
+    return static_cast<status_t>(resp.status());
   }
 
   status_t GetCameraCharacteristics(const uint32_t client_id,
@@ -1817,7 +1857,6 @@ status_t RecorderClient::SetCameraSessionParam(const uint32_t camera_id,
   return ret;
 }
 
-#ifdef VHDR_MODES_ENABLE
 status_t RecorderClient::SetVHDR(const uint32_t camera_id,
                                  const int32_t mode) {
 
@@ -1835,7 +1874,7 @@ status_t RecorderClient::SetVHDR(const uint32_t camera_id,
   QMMF_DEBUG("%s Exit ", __func__);
   return ret;
 }
-#else
+
 status_t RecorderClient::SetSHDR(const uint32_t camera_id,
                                  const bool enable) {
 
@@ -1853,7 +1892,6 @@ status_t RecorderClient::SetSHDR(const uint32_t camera_id,
   QMMF_DEBUG("%s Exit ", __func__);
   return ret;
 }
-#endif // VHDR_MODES_ENABLE
 
 status_t RecorderClient::GetDefaultCaptureParam(const uint32_t camera_id,
                                                 CameraMetadata &meta) {
@@ -1892,7 +1930,7 @@ status_t RecorderClient::GetCamStaticInfo(std::vector<CameraMetadata> &meta) {
 status_t RecorderClient::GetCameraCharacteristics(const uint32_t camera_id,
                                                   CameraMetadata &meta) {
 
-  QMMF_DEBUG("%s Enter ", __func__);
+  QMMF_DEBUG("%s: Enter ", __func__);
   std::lock_guard<std::mutex> lock(lock_);
   if (!CheckServiceStatus()) {
     return -ENODEV;
@@ -1903,7 +1941,53 @@ status_t RecorderClient::GetCameraCharacteristics(const uint32_t camera_id,
   if (0 != ret) {
     QMMF_ERROR("%s GetCameraCharacteristics failed!", __func__);
   }
-  QMMF_DEBUG("%s Exit ", __func__);
+  QMMF_DEBUG("%s: Exit ", __func__);
+  return ret;
+}
+
+status_t RecorderClient::GetFeatureCapabilities(FeatureCapabilityMap& capabilities) {
+  QMMF_DEBUG("%s: Enter", __func__);
+  std::lock_guard<std::mutex> lock(lock_);
+  if (!CheckServiceStatus()) {
+    return -ENODEV;
+  }
+  assert(client_id_ > 0);
+  auto ret = recorder_service_->GetFeatureCapabilities(client_id_, capabilities);
+  if (0 != ret) {
+    QMMF_ERROR("%s: GetFeatureCapabilities failed!", __func__);
+    return ret;
+  }
+  QMMF_INFO("%s: GetFeatureCapabilities returned %zu entries, ret(%d)",
+            __func__, capabilities.size(), ret);
+
+  // ── Debug: print all entries in the capability map ──────────────────────
+  QMMF_INFO("%s: ---- FeatureCapabilityMap dump ----", __func__);
+  for (const auto& [key, cap] : capabilities) {
+    switch (cap.type) {
+      case TYPE_BOOL:
+        QMMF_INFO("%s:   key[%d] = bool(%s)",
+                  __func__, static_cast<int>(key),
+                  cap.bool_value ? "true" : "false");
+        break;
+      case TYPE_INT32:
+        QMMF_INFO("%s:   key[%d] = int32(%d)",
+                  __func__, static_cast<int>(key), cap.int_value);
+        break;
+      case TYPE_FLOAT:
+        QMMF_INFO("%s:   key[%d] = float(%.2f)",
+                  __func__, static_cast<int>(key), cap.float_value);
+        break;
+      default:
+        QMMF_INFO("%s:   key[%d] = unknown type(%d)",
+                  __func__, static_cast<int>(key),
+                  static_cast<int>(cap.type));
+        break;
+    }
+  }
+  QMMF_INFO("%s: ---- end of FeatureCapabilityMap ----", __func__);
+  // ────────────────────────────────────────────────────────────────────────
+
+  QMMF_DEBUG("%s: Exit", __func__);
   return ret;
 }
 
@@ -2140,6 +2224,9 @@ void RecorderClient::ImportBuffer(int32_t fd, int32_t metafd,
       break;
     case BufferFormat::kNV12HEIF:
       format = GBM_FORMAT_NV12_HEIF;
+      break;
+    case BufferFormat::kP010HEIF:
+      format = GBM_FORMAT_YCbCr_420_P010_512;
       break;
     default:
       format = GBM_FORMAT_NOT_DEFIEND;
@@ -2960,6 +3047,13 @@ class BpRecorderService: public BpInterface<IRecorderService> {
     return reply.readInt32();
   }
 
+  status_t SetVHDR(const uint32_t client_id,
+                   const uint32_t camera_id,
+                   const int32_t mode) {
+    // Dead code — VHDR not supported on this target (binder/non-QLI build)
+    return 0;
+  }
+
   status_t GetDefaultCaptureParam(const uint32_t client_id,
                                   const uint32_t camera_id,
                                   CameraMetadata &meta) {
@@ -3689,6 +3783,7 @@ void RecorderServiceCallbackStub::ThreadLoop() {
     msg.msg_control = cmsgbuf;
     msg.msg_controllen = sizeof(cmsgbuf);
     fds_.clear();
+    fds_idx_ = 0;
     memset(socket_recv_buf_, 0, kMaxSocketBufSize);
 
     ssize_t bytes_read = recvmsg(client_socket_, &msg, 0);
@@ -3775,13 +3870,10 @@ status_t RecorderServiceCallbackStub::ProcessCallbackMsg(
       uint32_t camera_id = data.camera_id();
       uint32_t count = data.img_count();
       BnBuffer bn_buffer;
-      if (fds_.size()) {
-        bn_buffer.ion_fd = fds_[0];
-        bn_buffer.ion_meta_fd = fds_[1];
-      } else {
-        bn_buffer.ion_fd = -1;
-        bn_buffer.ion_meta_fd = -1;
-      }
+      bn_buffer.ion_fd = (data.buffer().ion_fd() != -1
+          && fds_idx_ < fds_.size()) ? fds_[fds_idx_++] : -1;
+      bn_buffer.ion_meta_fd = (data.buffer().ion_meta_fd() != -1
+          && fds_idx_ < fds_.size()) ? fds_[fds_idx_++] : -1;
       bn_buffer.img_id = data.buffer().img_id();
       bn_buffer.size = data.buffer().size();
       bn_buffer.timestamp = data.buffer().timestamp();
@@ -3815,8 +3907,10 @@ status_t RecorderServiceCallbackStub::ProcessCallbackMsg(
       std::vector<BnBuffer> buffers;
       for (auto &&b_data : data.buffers()) {
         BnBuffer buffer;
-        buffer.ion_fd = (fds_.size() >= 1) ? fds_[0] : -1;
-        buffer.ion_meta_fd = (fds_.size() >= 2) ? fds_[1] : -1;
+        buffer.ion_fd = (b_data.ion_fd() != -1 && fds_idx_ < fds_.size())
+            ? fds_[fds_idx_++] : -1;
+        buffer.ion_meta_fd = (b_data.ion_meta_fd() != -1 &&
+            fds_idx_ < fds_.size()) ? fds_[fds_idx_++] : -1;
         buffer.img_id = b_data.img_id();
         buffer.size = b_data.size();
         buffer.timestamp = b_data.timestamp();
